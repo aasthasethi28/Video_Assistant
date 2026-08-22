@@ -1,8 +1,7 @@
-# ============================================================
-# REELMIND - api/main.py
-# ============================================================
-
 import uuid
+import os
+import re
+import html
 import shutil
 import tempfile
 import traceback
@@ -46,7 +45,9 @@ load_dotenv(ENV_FILE)
 # PROJECT IMPORTS
 # ============================================================
 
-from utils.audio_processor import process_input
+from utils.audio_processor import process_input, chunk_audio
+import yt_dlp
+from pydub import AudioSegment
 
 from core.transcriber import transcribe_all
 
@@ -65,6 +66,282 @@ from core.rag_engine import (
     build_rag_chain,
     ask_question,
 )
+
+
+
+# ============================================================
+# YOUTUBE / INPUT HELPERS
+# ============================================================
+
+YOUTUBE_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)"
+    r"([A-Za-z0-9_-]{11})"
+)
+
+
+def _youtube_video_id(url: str) -> Optional[str]:
+    match = YOUTUBE_URL_RE.search(str(url))
+    return match.group(1) if match else None
+
+
+def _youtube_is_auth_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    markers = (
+        "sign in to confirm",
+        "you're not a bot",
+        "you’re not a bot",
+        "cookies-from-browser",
+        "cookies for the authentication",
+        "login_required",
+    )
+    return any(marker in message for marker in markers)
+
+
+def _download_youtube_audio_api(url: str) -> str:
+    """
+    Server-side YouTube audio extraction.
+
+    We deliberately keep this isolated from utils.audio_processor.py so
+    the API can try safer yt-dlp clients without changing the rest of
+    the application.
+    """
+    download_dir = PROJECT_ROOT / "downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    cookie_file = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    cookie_file_path = Path(cookie_file) if cookie_file else None
+
+    base_opts = {
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "outtmpl": str(download_dir / "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": False,
+        "no_warnings": False,
+        "retries": 2,
+        "fragment_retries": 2,
+        "socket_timeout": 30,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+            }
+        ],
+    }
+
+    if cookie_file_path and cookie_file_path.exists():
+        base_opts["cookiefile"] = str(cookie_file_path)
+        print("YouTube cookies: enabled")
+    else:
+        print("YouTube cookies: not configured")
+
+    # Keep the attempts conservative. If YouTube requires account
+    # authentication/PO tokens, yt-dlp cannot manufacture those on Render.
+    client_attempts = [
+        ["android_vr"],
+        ["web_embedded"],
+        ["web_safari"],
+    ]
+
+    last_error = None
+
+    for clients in client_attempts:
+        opts = dict(base_opts)
+        opts["extractor_args"] = {
+            "youtube": {
+                "player_client": clients,
+            }
+        }
+
+        print(
+            "YouTube extraction attempt:",
+            ",".join(clients),
+        )
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+
+            video_id = (info or {}).get("id")
+            if not video_id:
+                raise RuntimeError(
+                    "YouTube did not return a video ID."
+                )
+
+            wav_path = download_dir / f"{video_id}.wav"
+
+            if wav_path.exists():
+                return str(wav_path)
+
+            # Some yt-dlp/FFmpeg combinations can preserve another
+            # extension. Convert it through pydub as a final local step.
+            candidates = list(download_dir.glob(f"{video_id}.*"))
+            candidates = [
+                p for p in candidates
+                if p.suffix.lower() not in {".part", ".ytdl", ".wav"}
+            ]
+
+            if candidates:
+                converted = download_dir / f"{video_id}.wav"
+                audio = AudioSegment.from_file(str(candidates[0]))
+                audio.export(str(converted), format="wav")
+                return str(converted)
+
+            raise FileNotFoundError(
+                "yt-dlp completed but no downloaded audio file was found."
+            )
+
+        except Exception as exc:
+            last_error = exc
+            print(
+                "YouTube extraction attempt failed:",
+                type(exc).__name__,
+                str(exc),
+            )
+
+            if cookie_file_path and cookie_file_path.exists():
+                # A supplied cookie file should be treated as the user's
+                # intended authentication source; further client retries
+                # are still attempted but the final error remains explicit.
+                continue
+
+    if last_error is None:
+        raise RuntimeError("YouTube audio extraction failed.")
+
+    raise last_error
+
+
+def _download_public_youtube_transcript(
+    url: str,
+    preferred_language: str,
+) -> Optional[str]:
+    """
+    Lightweight fallback using YouTube's public timed-text endpoint.
+
+    This does not bypass authentication. It only helps when the video
+    exposes a public caption track. If no public captions are available,
+    None is returned and the normal audio error is preserved.
+    """
+    video_id = _youtube_video_id(url)
+
+    if not video_id:
+        return None
+
+    import requests
+    import xml.etree.ElementTree as ET
+
+    language_candidates = (
+        ["hi", "en"]
+        if preferred_language == "hinglish"
+        else ["en", "hi"]
+    )
+
+    for lang in language_candidates:
+        urls = [
+            (
+                "https://www.youtube.com/api/timedtext"
+                f"?v={video_id}&lang={lang}&fmt=srv3"
+            ),
+            (
+                "https://video.google.com/timedtext"
+                f"?v={video_id}&lang={lang}&fmt=srv3"
+            ),
+        ]
+
+        for caption_url in urls:
+            try:
+                response = requests.get(
+                    caption_url,
+                    timeout=15,
+                    headers={
+                        "User-Agent":
+                            "Mozilla/5.0"
+                    },
+                )
+
+                if response.status_code != 200:
+                    continue
+
+                body = response.text.strip()
+
+                if not body or "<text" not in body:
+                    continue
+
+                root = ET.fromstring(body)
+
+                parts = []
+
+                for node in root.findall(".//text"):
+                    value = "".join(node.itertext()).strip()
+
+                    if value:
+                        value = html.unescape(value)
+                        value = re.sub(
+                            r"\s+",
+                            " ",
+                            value,
+                        )
+                        parts.append(value)
+
+                transcript = " ".join(parts).strip()
+
+                if transcript:
+                    print(
+                        "Public YouTube captions recovered:",
+                        len(transcript),
+                        "characters",
+                    )
+                    return transcript
+
+            except Exception as exc:
+                print(
+                    "Caption fallback attempt failed:",
+                    type(exc).__name__,
+                    str(exc),
+                )
+
+    return None
+
+
+def process_input_api(source: str) -> list:
+    """
+    API-specific input processing.
+
+    Local files continue to use the project's existing processor.
+    YouTube URLs first use resilient yt-dlp extraction.
+    """
+    source = str(source).strip()
+
+    if not source.startswith(("http://", "https://")):
+        return process_input(source)
+
+    wav_path = _download_youtube_audio_api(source)
+
+    print("Audio file:", wav_path)
+    print("Chunking audio...")
+
+    chunks = chunk_audio(
+        wav_path,
+        chunk_minutes=10,
+    )
+
+    if not chunks:
+        raise RuntimeError(
+            "YouTube audio was downloaded, but no audio chunks were created."
+        )
+
+    print(
+        f"Audio ready — {len(chunks)} chunk(s) created."
+    )
+
+    return chunks
 
 
 # ============================================================
@@ -340,6 +617,7 @@ async def analyze(
         uuid.uuid4()
     )
 
+    caption_transcript = None
 
     # ========================================================
     # 1. PROCESS INPUT
@@ -352,12 +630,38 @@ async def analyze(
         )
 
 
-        chunks = process_input(
-            source
-        )
+        try:
+            chunks = process_input_api(source)
+        except Exception as input_error:
+            # YouTube may temporarily require authentication/PO tokens.
+            # If that happens, try public captions before failing.
+            if (
+                _youtube_video_id(source)
+                and _youtube_is_auth_error(input_error)
+            ):
+                print(
+                    "YouTube authentication challenge detected."
+                )
+                print(
+                    "Trying public caption fallback..."
+                )
+
+                caption_transcript = (
+                    _download_public_youtube_transcript(
+                        source,
+                        language,
+                    )
+                )
+
+                if caption_transcript:
+                    chunks = []
+                else:
+                    raise
+            else:
+                raise
 
 
-        if not chunks:
+        if not chunks and not caption_transcript:
 
             raise RuntimeError(
                 "No audio chunks were produced."
@@ -418,13 +722,20 @@ async def analyze(
         )
 
 
-        transcript = transcribe_all(
-
-            chunks,
-
-            language,
-
-        )
+        if (
+            "caption_transcript" in locals()
+            and caption_transcript
+            and not chunks
+        ):
+            transcript = caption_transcript
+            print(
+                "[2/6] Using public YouTube captions."
+            )
+        else:
+            transcript = transcribe_all(
+                chunks,
+                language,
+            )
 
 
         if not transcript:
