@@ -8,7 +8,7 @@ import tempfile
 import traceback
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -83,13 +83,17 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://video-assistant-1.onrender.com",
     ],
+
     allow_credentials=True,
+
     allow_methods=["*"],
+
     allow_headers=["*"],
 )
 
@@ -113,6 +117,14 @@ class ChatRequest(BaseModel):
 
     history: list = []
 
+    # IMPORTANT:
+    # Frontend can send the transcript so that
+    # the backend can rebuild a lost RAG session.
+
+    transcript: Optional[str] = None
+
+    language: Optional[str] = "english"
+
 
 # ============================================================
 # HELPERS
@@ -123,11 +135,14 @@ def normalize_language(
 ) -> str:
 
     if language is None:
+
         return "english"
+
 
     language = str(
         language
     ).strip().lower()
+
 
     if language in {
         "hinglish",
@@ -139,8 +154,11 @@ def normalize_language(
 
         return "hinglish"
 
+
     return "english"
 
+
+# ============================================================
 
 def extract_source_and_language(
     payload: Any
@@ -163,6 +181,7 @@ def extract_source_and_language(
             or "english"
         )
 
+
     elif isinstance(
         payload,
         str
@@ -171,6 +190,7 @@ def extract_source_and_language(
         source = payload
 
         language = "english"
+
 
     else:
 
@@ -197,6 +217,8 @@ def extract_source_and_language(
     )
 
 
+# ============================================================
+
 def error_text(
     error: Exception
 ) -> str:
@@ -205,11 +227,11 @@ def error_text(
         error
     ).strip()
 
+
     if not text:
 
-        text = (
-            "Unknown error"
-        )
+        text = "Unknown error"
+
 
     return text
 
@@ -281,13 +303,8 @@ async def analyze(
         )
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=(
-                "Invalid JSON request."
-            ),
-
+            detail="Invalid JSON request.",
         )
 
 
@@ -314,13 +331,8 @@ async def analyze(
     if not source:
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=(
-                "Please provide a YouTube URL."
-            ),
-
+            detail="Please provide a YouTube URL.",
         )
 
 
@@ -339,9 +351,11 @@ async def analyze(
             "[1/6] Processing input..."
         )
 
+
         chunks = process_input(
             source
         )
+
 
         if not chunks:
 
@@ -349,9 +363,11 @@ async def analyze(
                 "No audio chunks were produced."
             )
 
+
         print(
             f"[1/6] OK - {len(chunks)} chunks"
         )
+
 
     except Exception as e:
 
@@ -366,6 +382,7 @@ async def analyze(
         )
 
         traceback.print_exc()
+
 
         return {
 
@@ -400,6 +417,7 @@ async def analyze(
             "[2/6] Transcribing audio..."
         )
 
+
         transcript = transcribe_all(
 
             chunks,
@@ -421,6 +439,7 @@ async def analyze(
             len(transcript)
         )
 
+
     except Exception as e:
 
         print()
@@ -434,6 +453,7 @@ async def analyze(
         )
 
         traceback.print_exc()
+
 
         return {
 
@@ -468,6 +488,7 @@ async def analyze(
             "[3/6] Generating title..."
         )
 
+
         title = generate_title(
             transcript
         )
@@ -477,6 +498,7 @@ async def analyze(
             "[3/6] Generating summary..."
         )
 
+
         summary = summarize(
             transcript
         )
@@ -485,6 +507,7 @@ async def analyze(
         print(
             "[3/6] OK"
         )
+
 
     except Exception as e:
 
@@ -499,6 +522,7 @@ async def analyze(
         )
 
         traceback.print_exc()
+
 
         return {
 
@@ -559,6 +583,7 @@ async def analyze(
             "[4/6] OK"
         )
 
+
     except Exception as e:
 
         print()
@@ -572,6 +597,7 @@ async def analyze(
         )
 
         traceback.print_exc()
+
 
         return {
 
@@ -620,6 +646,7 @@ async def analyze(
             "[5/6] OK"
         )
 
+
     except Exception as e:
 
         print()
@@ -633,6 +660,7 @@ async def analyze(
         )
 
         traceback.print_exc()
+
 
         return {
 
@@ -695,10 +723,6 @@ async def analyze(
     }
 
 
-    # ========================================================
-    # READY
-    # ========================================================
-
     print()
     print("=" * 70)
     print("REELMIND READY")
@@ -709,6 +733,10 @@ async def analyze(
     print("=" * 70)
     print()
 
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
 
     return {
 
@@ -753,13 +781,8 @@ async def upload_file(
         if not file.filename:
 
             raise HTTPException(
-
                 status_code=400,
-
-                detail=(
-                    "No filename was provided."
-                ),
-
+                detail="No filename was provided.",
             )
 
 
@@ -837,15 +860,13 @@ async def upload_file(
 
         traceback.print_exc()
 
+
         raise HTTPException(
-
             status_code=500,
-
             detail=(
                 f"Upload failed: "
                 f"{error_text(e)}"
             ),
-
         )
 
 
@@ -865,13 +886,8 @@ async def analyze_file(
     if not file.filename:
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=(
-                "No file was provided."
-            ),
-
+            detail="No file was provided.",
         )
 
 
@@ -939,6 +955,10 @@ async def analyze_file(
         )
 
 
+        # ----------------------------------------------------
+        # PROCESS
+        # ----------------------------------------------------
+
         chunks = process_input(
             str(file_path)
         )
@@ -950,6 +970,10 @@ async def analyze_file(
                 "No audio chunks were produced."
             )
 
+
+        # ----------------------------------------------------
+        # TRANSCRIBE
+        # ----------------------------------------------------
 
         transcript = transcribe_all(
 
@@ -967,6 +991,10 @@ async def analyze_file(
             )
 
 
+        # ----------------------------------------------------
+        # SUMMARY
+        # ----------------------------------------------------
+
         title = generate_title(
             transcript
         )
@@ -976,6 +1004,10 @@ async def analyze_file(
             transcript
         )
 
+
+        # ----------------------------------------------------
+        # EXTRACTION
+        # ----------------------------------------------------
 
         action_items = (
             extract_action_items(
@@ -998,6 +1030,10 @@ async def analyze_file(
         )
 
 
+        # ----------------------------------------------------
+        # RAG
+        # ----------------------------------------------------
+
         rag_chain = build_rag_chain(
 
             transcript,
@@ -1006,6 +1042,10 @@ async def analyze_file(
 
         )
 
+
+        # ----------------------------------------------------
+        # SAVE SESSION
+        # ----------------------------------------------------
 
         sessions[
             session_id
@@ -1039,6 +1079,17 @@ async def analyze_file(
                 [],
 
         }
+
+
+        print()
+        print("=" * 70)
+        print("FILE ANALYSIS READY")
+        print(
+            "Session:",
+            session_id
+        )
+        print("=" * 70)
+        print()
 
 
         return {
@@ -1127,24 +1178,157 @@ async def chat(
     request: ChatRequest
 ):
 
+    print()
+    print("=" * 70)
+    print("REELMIND CHAT REQUEST")
+    print("Session:", request.session_id)
+    print("Question:", request.question)
+    print("=" * 70)
+
+
+    # ========================================================
+    # FIND EXISTING SESSION
+    # ========================================================
+
     session = sessions.get(
         request.session_id
     )
 
 
-    if not session:
+    if session:
 
-        raise HTTPException(
-
-            status_code=404,
-
-            detail=(
-                "This meeting session has expired. "
-                "Please analyze the recording again."
-            ),
-
+        print(
+            "CHAT: Existing session found."
         )
 
+
+    # ========================================================
+    # SESSION RECOVERY
+    # ========================================================
+
+    else:
+
+        print(
+            "CHAT: Session not found in memory."
+        )
+
+
+        # ----------------------------------------------------
+        # RECOVER USING TRANSCRIPT
+        # ----------------------------------------------------
+
+        if request.transcript:
+
+            print(
+                "CHAT: Transcript supplied."
+            )
+
+            print(
+                "CHAT: Rebuilding RAG chain..."
+            )
+
+
+            try:
+
+                rag_chain = build_rag_chain(
+
+                    request.transcript,
+
+                    session_id=request.session_id,
+
+                )
+
+
+                session = {
+
+                    "rag_chain":
+                        rag_chain,
+
+                    "transcript":
+                        request.transcript,
+
+                    "language":
+                        normalize_language(
+                            request.language
+                        ),
+
+                    "history":
+                        [],
+
+                }
+
+
+                sessions[
+                    request.session_id
+                ] = session
+
+
+                print(
+                    "CHAT: Session successfully rebuilt."
+                )
+
+
+            except Exception as e:
+
+                print()
+                print(
+                    "!!! CHAT SESSION RECOVERY ERROR !!!"
+                )
+
+                print(
+                    type(e).__name__,
+                    error_text(e)
+                )
+
+                traceback.print_exc()
+
+
+                return {
+
+                    "success":
+                        False,
+
+                    "error":
+                        True,
+
+                    "stage":
+                        "chat_session_recovery",
+
+                    "error_type":
+                        type(e).__name__,
+
+                    "error_message":
+                        error_text(e),
+
+                }
+
+
+        # ----------------------------------------------------
+        # NO TRANSCRIPT
+        # ----------------------------------------------------
+
+        else:
+
+            print(
+                "CHAT: No transcript available for recovery."
+            )
+
+
+            raise HTTPException(
+
+                status_code=404,
+
+                detail=(
+                    "This meeting session has expired. "
+                    "Please analyze the recording again."
+                ),
+
+            )
+
+
+    # ========================================================
+    # QUESTION
+    # ========================================================
 
     question = (
         request.question
@@ -1165,15 +1349,32 @@ async def chat(
         }
 
 
+    # ========================================================
+    # HISTORY
+    # ========================================================
+
+    history = (
+
+        request.history
+
+        if isinstance(
+            request.history,
+            list
+        )
+
+        else []
+
+    )
+
+
+    # ========================================================
+    # ASK RAG
+    # ========================================================
+
     try:
 
-        history = (
-            request.history
-            if isinstance(
-                request.history,
-                list
-            )
-            else []
+        print(
+            "CHAT: Sending question to RAG..."
         )
 
 
@@ -1202,6 +1403,17 @@ async def chat(
         ).strip()
 
 
+        # ----------------------------------------------------
+        # SAVE HISTORY
+        # ----------------------------------------------------
+
+        if "history" not in session:
+
+            session[
+                "history"
+            ] = []
+
+
         session[
             "history"
         ].append({
@@ -1228,6 +1440,11 @@ async def chat(
         })
 
 
+        print(
+            "CHAT: Answer generated successfully."
+        )
+
+
         return {
 
             "success":
@@ -1243,7 +1460,10 @@ async def chat(
 
         print()
         print(
-            "CHAT ERROR:",
+            "!!! CHAT ERROR !!!"
+        )
+
+        print(
             type(e).__name__,
             error_text(e)
         )
