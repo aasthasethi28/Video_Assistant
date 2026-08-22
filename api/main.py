@@ -2,7 +2,6 @@
 # REELMIND - api/main.py
 # ============================================================
 
-import os
 import uuid
 import shutil
 import tempfile
@@ -44,7 +43,7 @@ load_dotenv(ENV_FILE)
 
 
 # ============================================================
-# IMPORT PROJECT MODULES
+# PROJECT IMPORTS
 # ============================================================
 
 from utils.audio_processor import process_input
@@ -84,20 +83,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-
     allow_origins=[
-        # Local development
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-
-        # Render frontend
         "https://video-assistant-1.onrender.com",
     ],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"],
 )
 
@@ -110,7 +102,7 @@ sessions: dict[str, dict[str, Any]] = {}
 
 
 # ============================================================
-# CHAT MODEL
+# CHAT REQUEST
 # ============================================================
 
 class ChatRequest(BaseModel):
@@ -153,26 +145,6 @@ def normalize_language(
 def extract_source_and_language(
     payload: Any
 ):
-
-    """
-    Accept several request shapes safely.
-
-    Preferred:
-
-        {
-            "source": "...",
-            "language": "hinglish"
-        }
-
-    Also accepts:
-
-        {
-            "url": "...",
-            "language": "hinglish"
-        }
-
-    or a plain string.
-    """
 
     if isinstance(
         payload,
@@ -225,21 +197,21 @@ def extract_source_and_language(
     )
 
 
-def clean_error_message(
+def error_text(
     error: Exception
 ) -> str:
 
-    message = str(
+    text = str(
         error
     ).strip()
 
-    if not message:
+    if not text:
 
-        message = (
-            "An unexpected error occurred."
+        text = (
+            "Unknown error"
         )
 
-    return message
+    return text
 
 
 # ============================================================
@@ -285,7 +257,7 @@ async def health():
 
 
 # ============================================================
-# ANALYZE YOUTUBE URL
+# ANALYZE YOUTUBE / URL
 # ============================================================
 
 @app.post("/api/analyze")
@@ -293,15 +265,20 @@ async def analyze(
     request: Request
 ):
 
-    # ========================================================
-    # READ RAW REQUEST
-    # ========================================================
+    # --------------------------------------------------------
+    # READ REQUEST
+    # --------------------------------------------------------
 
     try:
 
         payload = await request.json()
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "JSON REQUEST ERROR:",
+            repr(e)
+        )
 
         raise HTTPException(
 
@@ -314,9 +291,9 @@ async def analyze(
         )
 
 
-    # ========================================================
-    # NORMALIZE REQUEST
-    # ========================================================
+    # --------------------------------------------------------
+    # SOURCE + LANGUAGE
+    # --------------------------------------------------------
 
     source, language = (
         extract_source_and_language(
@@ -325,9 +302,14 @@ async def analyze(
     )
 
 
-    # ========================================================
-    # VALIDATE SOURCE
-    # ========================================================
+    print()
+    print("=" * 70)
+    print("REELMIND ANALYZE REQUEST")
+    print("Source:", source)
+    print("Language:", language)
+    print("=" * 70)
+    print()
+
 
     if not source:
 
@@ -336,58 +318,22 @@ async def analyze(
             status_code=400,
 
             detail=(
-                "Please provide a YouTube URL "
-                "or a local audio/video file path."
+                "Please provide a YouTube URL."
             ),
 
         )
 
-
-    # ========================================================
-    # SESSION
-    # ========================================================
 
     session_id = str(
         uuid.uuid4()
     )
 
 
-    print()
-    print(
-        "=" * 70
-    )
-
-    print(
-        "REELMIND ANALYSIS STARTED"
-    )
-
-    print(
-        "Session:",
-        session_id
-    )
-
-    print(
-        "Source:",
-        source
-    )
-
-    print(
-        "Language:",
-        language
-    )
-
-    print(
-        "=" * 70
-    )
-
-    print()
-
+    # ========================================================
+    # 1. PROCESS INPUT
+    # ========================================================
 
     try:
-
-        # ====================================================
-        # 1. PROCESS INPUT
-        # ====================================================
 
         print(
             "[1/6] Processing input..."
@@ -397,28 +343,62 @@ async def analyze(
             source
         )
 
-
         if not chunks:
 
             raise RuntimeError(
                 "No audio chunks were produced."
             )
 
-
         print(
-            f"Audio chunks: {len(chunks)}"
+            f"[1/6] OK - {len(chunks)} chunks"
         )
 
-
-        # ====================================================
-        # 2. TRANSCRIPTION
-        # ====================================================
+    except Exception as e:
 
         print()
         print(
-            "[2/6] Transcribing audio..."
+            "!!! PROCESS INPUT ERROR !!!"
         )
 
+        print(
+            type(e).__name__,
+            error_text(e)
+        )
+
+        traceback.print_exc()
+
+        return {
+
+            "success":
+                False,
+
+            "error":
+                True,
+
+            "stage":
+                "processing_input",
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+            "session_id":
+                session_id,
+
+        }
+
+
+    # ========================================================
+    # 2. TRANSCRIPTION
+    # ========================================================
+
+    try:
+
+        print(
+            "[2/6] Transcribing audio..."
+        )
 
         transcript = transcribe_all(
 
@@ -437,20 +417,56 @@ async def analyze(
 
 
         print(
-            "Transcript length:",
+            "[2/6] OK - transcript length:",
             len(transcript)
         )
 
-
-        # ====================================================
-        # 3. TITLE + SUMMARY
-        # ====================================================
+    except Exception as e:
 
         print()
         print(
-            "[3/6] Generating title..."
+            "!!! TRANSCRIPTION ERROR !!!"
         )
 
+        print(
+            type(e).__name__,
+            error_text(e)
+        )
+
+        traceback.print_exc()
+
+        return {
+
+            "success":
+                False,
+
+            "error":
+                True,
+
+            "stage":
+                "transcription",
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+            "session_id":
+                session_id,
+
+        }
+
+
+    # ========================================================
+    # 3. TITLE + SUMMARY
+    # ========================================================
+
+    try:
+
+        print(
+            "[3/6] Generating title..."
+        )
 
         title = generate_title(
             transcript
@@ -461,17 +477,58 @@ async def analyze(
             "[3/6] Generating summary..."
         )
 
-
         summary = summarize(
             transcript
         )
 
 
-        # ====================================================
-        # 4. EXTRACTION
-        # ====================================================
+        print(
+            "[3/6] OK"
+        )
+
+    except Exception as e:
 
         print()
+        print(
+            "!!! SUMMARY ERROR !!!"
+        )
+
+        print(
+            type(e).__name__,
+            error_text(e)
+        )
+
+        traceback.print_exc()
+
+        return {
+
+            "success":
+                False,
+
+            "error":
+                True,
+
+            "stage":
+                "summary",
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+            "session_id":
+                session_id,
+
+        }
+
+
+    # ========================================================
+    # 4. EXTRACTION
+    # ========================================================
+
+    try:
+
         print(
             "[4/6] Extracting meeting information..."
         )
@@ -498,11 +555,53 @@ async def analyze(
         )
 
 
-        # ====================================================
-        # 5. BUILD RAG
-        # ====================================================
+        print(
+            "[4/6] OK"
+        )
+
+    except Exception as e:
 
         print()
+        print(
+            "!!! EXTRACTION ERROR !!!"
+        )
+
+        print(
+            type(e).__name__,
+            error_text(e)
+        )
+
+        traceback.print_exc()
+
+        return {
+
+            "success":
+                False,
+
+            "error":
+                True,
+
+            "stage":
+                "extraction",
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+            "session_id":
+                session_id,
+
+        }
+
+
+    # ========================================================
+    # 5. RAG
+    # ========================================================
+
+    try:
+
         print(
             "[5/6] Building RAG index..."
         )
@@ -517,138 +616,127 @@ async def analyze(
         )
 
 
-        # ====================================================
-        # SAVE SESSION
-        # ====================================================
-
-        sessions[
-            session_id
-        ] = {
-
-            "rag_chain":
-                rag_chain,
-
-            "transcript":
-                transcript,
-
-            "title":
-                title,
-
-            "summary":
-                summary,
-
-            "action_items":
-                action_items,
-
-            "key_decisions":
-                decisions,
-
-            "open_questions":
-                questions,
-
-            "language":
-                language,
-
-            "history":
-                [],
-
-        }
-
-
-        # ====================================================
-        # 6. READY
-        # ====================================================
-
-        print()
         print(
-            "[6/6] REELMIND READY"
+            "[5/6] OK"
         )
-
-        print(
-            "Session:",
-            session_id
-        )
-
-        print(
-            "=" * 70
-        )
-
-        print()
-
-
-        return {
-
-            "success":
-                True,
-
-            "session_id":
-                session_id,
-
-            "title":
-                title,
-
-            "transcript":
-                transcript,
-
-            "summary":
-                summary,
-
-            "action_items":
-                action_items,
-
-            "key_decisions":
-                decisions,
-
-            "open_questions":
-                questions,
-
-        }
-
 
     except Exception as e:
 
         print()
         print(
-            "=" * 70
+            "!!! RAG ERROR !!!"
         )
 
         print(
-            "REELMIND ANALYZE ERROR"
-        )
-
-        print(
-            "Type:",
-            type(e).__name__
-        )
-
-        print(
-            "Message:",
-            clean_error_message(e)
-        )
-
-        print(
-            "-" * 70
+            type(e).__name__,
+            error_text(e)
         )
 
         traceback.print_exc()
 
-        print(
-            "=" * 70
-        )
+        return {
 
-        print()
+            "success":
+                False,
+
+            "error":
+                True,
+
+            "stage":
+                "rag",
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+            "session_id":
+                session_id,
+
+        }
 
 
-        raise HTTPException(
+    # ========================================================
+    # SAVE SESSION
+    # ========================================================
 
-            status_code=500,
+    sessions[
+        session_id
+    ] = {
 
-            detail=(
-                "Unable to analyze the recording. "
-                "Please check the backend terminal for details."
-            ),
+        "rag_chain":
+            rag_chain,
 
-        )
+        "transcript":
+            transcript,
+
+        "title":
+            title,
+
+        "summary":
+            summary,
+
+        "action_items":
+            action_items,
+
+        "key_decisions":
+            decisions,
+
+        "open_questions":
+            questions,
+
+        "language":
+            language,
+
+        "history":
+            [],
+
+    }
+
+
+    # ========================================================
+    # READY
+    # ========================================================
+
+    print()
+    print("=" * 70)
+    print("REELMIND READY")
+    print(
+        "Session:",
+        session_id
+    )
+    print("=" * 70)
+    print()
+
+
+    return {
+
+        "success":
+            True,
+
+        "session_id":
+            session_id,
+
+        "title":
+            title,
+
+        "transcript":
+            transcript,
+
+        "summary":
+            summary,
+
+        "action_items":
+            action_items,
+
+        "key_decisions":
+            decisions,
+
+        "open_questions":
+            questions,
+
+    }
 
 
 # ============================================================
@@ -720,12 +808,6 @@ async def upload_file(
             )
 
 
-        print(
-            "Uploaded:",
-            file_path
-        )
-
-
         return {
 
             "success":
@@ -749,23 +831,26 @@ async def upload_file(
 
         print(
             "UPLOAD ERROR:",
-            repr(e)
+            type(e).__name__,
+            error_text(e)
         )
 
+        traceback.print_exc()
 
         raise HTTPException(
 
             status_code=500,
 
             detail=(
-                "Unable to upload the file."
+                f"Upload failed: "
+                f"{error_text(e)}"
             ),
 
         )
 
 
 # ============================================================
-# ANALYZE UPLOADED FILE
+# ANALYZE FILE
 # ============================================================
 
 @app.post("/api/analyze-file")
@@ -826,10 +911,6 @@ async def analyze_file(
 
     try:
 
-        # ----------------------------------------------------
-        # SAVE UPLOAD
-        # ----------------------------------------------------
-
         with open(
             file_path,
             "wb"
@@ -841,10 +922,6 @@ async def analyze_file(
             )
 
 
-        # ----------------------------------------------------
-        # SESSION
-        # ----------------------------------------------------
-
         session_id = str(
             uuid.uuid4()
         )
@@ -855,43 +932,10 @@ async def analyze_file(
         )
 
 
-        print()
         print(
-            "=" * 70
-        )
-
-        print(
-            "REELMIND FILE ANALYSIS STARTED"
-        )
-
-        print(
-            "Session:",
-            session_id
-        )
-
-        print(
-            "File:",
-            file_path
-        )
-
-        print(
-            "Language:",
+            "FILE ANALYSIS:",
+            file.filename,
             language
-        )
-
-        print(
-            "=" * 70
-        )
-
-        print()
-
-
-        # ----------------------------------------------------
-        # 1. PROCESS
-        # ----------------------------------------------------
-
-        print(
-            "[1/6] Processing input..."
         )
 
 
@@ -900,13 +944,11 @@ async def analyze_file(
         )
 
 
-        # ----------------------------------------------------
-        # 2. TRANSCRIBE
-        # ----------------------------------------------------
+        if not chunks:
 
-        print(
-            "[2/6] Transcribing audio..."
-        )
+            raise RuntimeError(
+                "No audio chunks were produced."
+            )
 
 
         transcript = transcribe_all(
@@ -925,36 +967,13 @@ async def analyze_file(
             )
 
 
-        # ----------------------------------------------------
-        # 3. TITLE + SUMMARY
-        # ----------------------------------------------------
-
-        print(
-            "[3/6] Generating title..."
-        )
-
-
         title = generate_title(
             transcript
         )
 
 
-        print(
-            "[3/6] Generating summary..."
-        )
-
-
         summary = summarize(
             transcript
-        )
-
-
-        # ----------------------------------------------------
-        # 4. EXTRACTION
-        # ----------------------------------------------------
-
-        print(
-            "[4/6] Extracting information..."
         )
 
 
@@ -976,15 +995,6 @@ async def analyze_file(
             extract_questions(
                 transcript
             )
-        )
-
-
-        # ----------------------------------------------------
-        # 5. RAG
-        # ----------------------------------------------------
-
-        print(
-            "[5/6] Building RAG..."
         )
 
 
@@ -1031,11 +1041,6 @@ async def analyze_file(
         }
 
 
-        print(
-            "[6/6] REELMIND READY"
-        )
-
-
         return {
 
             "success":
@@ -1069,34 +1074,35 @@ async def analyze_file(
 
         print()
         print(
-            "=" * 70
-        )
-
-        print(
-            "FILE ANALYSIS ERROR"
+            "FILE ANALYSIS ERROR:"
         )
 
         print(
             type(e).__name__,
-            str(e)
+            error_text(e)
         )
 
         traceback.print_exc()
 
-        print(
-            "=" * 70
-        )
 
+        return {
 
-        raise HTTPException(
+            "success":
+                False,
 
-            status_code=500,
+            "error":
+                True,
 
-            detail=(
-                "Unable to analyze the uploaded recording."
-            ),
+            "stage":
+                "file_analysis",
 
-        )
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
+
+        }
 
 
     finally:
@@ -1171,16 +1177,6 @@ async def chat(
         )
 
 
-        print()
-        print(
-            "CHAT QUESTION:"
-        )
-
-        print(
-            question
-        )
-
-
         answer = ask_question(
 
             session[
@@ -1205,10 +1201,6 @@ async def chat(
             answer
         ).strip()
 
-
-        # ----------------------------------------------------
-        # SAVE HISTORY
-        # ----------------------------------------------------
 
         session[
             "history"
@@ -1251,23 +1243,12 @@ async def chat(
 
         print()
         print(
-            "=" * 70
-        )
-
-        print(
-            "CHAT ERROR"
-        )
-
-        print(
+            "CHAT ERROR:",
             type(e).__name__,
-            str(e)
+            error_text(e)
         )
 
         traceback.print_exc()
-
-        print(
-            "=" * 70
-        )
 
 
         return {
@@ -1278,8 +1259,14 @@ async def chat(
             "answer":
                 (
                     "I couldn't answer that right now. "
-                    "Please try asking the question again."
+                    "Please try again."
                 ),
+
+            "error_type":
+                type(e).__name__,
+
+            "error_message":
+                error_text(e),
 
         }
 
