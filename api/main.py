@@ -2,6 +2,7 @@
 # REELMIND - api/main.py
 # ============================================================
 
+import os
 import uuid
 import shutil
 import tempfile
@@ -23,11 +24,11 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 # ============================================================
-# PATHS / ENV
+# PATHS / ENVIRONMENT
 # ============================================================
 
 PROJECT_ROOT = (
@@ -39,13 +40,11 @@ PROJECT_ROOT = (
 
 ENV_FILE = PROJECT_ROOT / ".env"
 
-load_dotenv(
-    ENV_FILE
-)
+load_dotenv(ENV_FILE)
 
 
 # ============================================================
-# PROJECT MODULES
+# IMPORT PROJECT MODULES
 # ============================================================
 
 from utils.audio_processor import process_input
@@ -75,7 +74,7 @@ from core.rag_engine import (
 
 app = FastAPI(
     title="REELMIND API",
-    version="2.0.0",
+    version="1.0.0",
 )
 
 
@@ -85,12 +84,20 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+
     allow_origins=[
+        # Local development
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+
+        # Render frontend
+        "https://video-assistant-1.onrender.com",
     ],
+
     allow_credentials=True,
+
     allow_methods=["*"],
+
     allow_headers=["*"],
 )
 
@@ -103,7 +110,7 @@ sessions: dict[str, dict[str, Any]] = {}
 
 
 # ============================================================
-# REQUEST MODELS
+# CHAT MODEL
 # ============================================================
 
 class ChatRequest(BaseModel):
@@ -112,11 +119,7 @@ class ChatRequest(BaseModel):
 
     question: str
 
-    language: str = "english"
-
-    history: list = Field(
-        default_factory=list
-    )
+    history: list = []
 
 
 # ============================================================
@@ -127,18 +130,21 @@ def normalize_language(
     language: Any
 ) -> str:
 
-    value = str(
-        language or "english"
+    if language is None:
+        return "english"
+
+    language = str(
+        language
     ).strip().lower()
 
-    if value in {
+    if language in {
         "hinglish",
         "hindi",
         "hi",
-        "hi-en",
         "codemix",
         "code-mix",
     }:
+
         return "hinglish"
 
     return "english"
@@ -149,19 +155,23 @@ def extract_source_and_language(
 ):
 
     """
-    Accept all frontend request forms.
+    Accept several request shapes safely.
 
     Preferred:
+
         {
             "source": "...",
-            "language": "english"
+            "language": "hinglish"
         }
 
     Also accepts:
+
         {
             "url": "...",
             "language": "hinglish"
         }
+
+    or a plain string.
     """
 
     if isinstance(
@@ -187,196 +197,49 @@ def extract_source_and_language(
     ):
 
         source = payload
+
         language = "english"
 
     else:
 
         source = None
+
         language = "english"
 
+
     if source is not None:
+
         source = str(
             source
         ).strip()
+
 
     language = normalize_language(
         language
     )
 
-    return source, language
 
-
-def analysis_result(
-    session_id: str,
-    title: str,
-    transcript: str,
-    summary: str,
-    action_items: Any,
-    decisions: Any,
-    questions: Any,
-):
-
-    return {
-        "success": True,
-        "session_id": session_id,
-        "title": title,
-        "transcript": transcript,
-        "summary": summary,
-        "action_items": action_items,
-        "key_decisions": decisions,
-        "open_questions": questions,
-    }
-
-
-def run_analysis(
-    source: str,
-    language: str,
-    session_id: str,
-):
-
-    # --------------------------------------------------------
-    # 1. AUDIO
-    # --------------------------------------------------------
-
-    print(
-        "[1/6] Processing input..."
-    )
-
-    chunks = process_input(
-        source
-    )
-
-    if not chunks:
-        raise RuntimeError(
-            "No audio chunks were produced."
-        )
-
-    print(
-        "Audio chunks:",
-        len(chunks)
-    )
-
-    # --------------------------------------------------------
-    # 2. TRANSCRIPTION
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[2/6] Transcribing audio..."
-    )
-
-    print(
-        "Language:",
+    return (
+        source,
         language
     )
 
-    transcript = transcribe_all(
-        chunks,
-        language,
-    )
 
-    if not transcript:
-        raise RuntimeError(
-            "Transcription returned empty text."
+def clean_error_message(
+    error: Exception
+) -> str:
+
+    message = str(
+        error
+    ).strip()
+
+    if not message:
+
+        message = (
+            "An unexpected error occurred."
         )
 
-    print(
-        "Transcript length:",
-        len(transcript)
-    )
-
-    # --------------------------------------------------------
-    # 3. TITLE + SUMMARY
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[3/6] Generating title..."
-    )
-
-    title = generate_title(
-        transcript
-    )
-
-    print(
-        "[3/6] Generating summary..."
-    )
-
-    summary = summarize(
-        transcript
-    )
-
-    # --------------------------------------------------------
-    # 4. EXTRACTION
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[4/6] Extracting meeting information..."
-    )
-
-    action_items = (
-        extract_action_items(
-            transcript
-        )
-    )
-
-    decisions = (
-        extract_key_decisions(
-            transcript
-        )
-    )
-
-    questions = (
-        extract_questions(
-            transcript
-        )
-    )
-
-    # --------------------------------------------------------
-    # 5. RAG
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[5/6] Building RAG index..."
-    )
-
-    rag_chain = build_rag_chain(
-        transcript,
-        session_id=session_id,
-    )
-
-    # --------------------------------------------------------
-    # SAVE SESSION
-    # --------------------------------------------------------
-
-    sessions[session_id] = {
-        "rag_chain": rag_chain,
-        "transcript": transcript,
-        "title": title,
-        "summary": summary,
-        "action_items": action_items,
-        "key_decisions": decisions,
-        "open_questions": questions,
-        "language": language,
-        "history": [],
-    }
-
-    print()
-    print(
-        "[6/6] REELMIND READY"
-    )
-
-    return analysis_result(
-        session_id=session_id,
-        title=title,
-        transcript=transcript,
-        summary=summary,
-        action_items=action_items,
-        decisions=decisions,
-        questions=questions,
-    )
+    return message
 
 
 # ============================================================
@@ -387,10 +250,19 @@ def run_analysis(
 async def root():
 
     return {
-        "name": "REELMIND",
-        "status": "running",
-        "api": "http://127.0.0.1:8000",
-        "frontend": "http://localhost:5173",
+
+        "name":
+            "REELMIND",
+
+        "status":
+            "running",
+
+        "api":
+            "https://video-assistant-jzzm.onrender.com",
+
+        "frontend":
+            "https://video-assistant-1.onrender.com",
+
     }
 
 
@@ -402,13 +274,18 @@ async def root():
 async def health():
 
     return {
-        "status": "ok",
-        "service": "reelmind-api",
+
+        "status":
+            "ok",
+
+        "service":
+            "reelmind-api",
+
     }
 
 
 # ============================================================
-# ANALYZE URL
+# ANALYZE YOUTUBE URL
 # ============================================================
 
 @app.post("/api/analyze")
@@ -416,20 +293,30 @@ async def analyze(
     request: Request
 ):
 
-    # --------------------------------------------------------
-    # Read JSON manually.
-    # This avoids the previous 422 schema mismatch.
-    # --------------------------------------------------------
+    # ========================================================
+    # READ RAW REQUEST
+    # ========================================================
 
     try:
+
         payload = await request.json()
 
     except Exception:
 
         raise HTTPException(
+
             status_code=400,
-            detail="Invalid JSON request.",
+
+            detail=(
+                "Invalid JSON request."
+            ),
+
         )
+
+
+    # ========================================================
+    # NORMALIZE REQUEST
+    # ========================================================
 
     source, language = (
         extract_source_and_language(
@@ -437,70 +324,330 @@ async def analyze(
         )
     )
 
+
+    # ========================================================
+    # VALIDATE SOURCE
+    # ========================================================
+
     if not source:
 
         raise HTTPException(
+
             status_code=400,
+
             detail=(
-                "Please provide a YouTube URL."
+                "Please provide a YouTube URL "
+                "or a local audio/video file path."
             ),
+
         )
 
-    if not (
-        source.startswith(
-            "http://"
-        )
-        or source.startswith(
-            "https://"
-        )
-    ):
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The URL must start with "
-                "http:// or https://."
-            ),
-        )
+    # ========================================================
+    # SESSION
+    # ========================================================
 
     session_id = str(
         uuid.uuid4()
     )
 
+
     print()
-    print("=" * 70)
-    print("REELMIND ANALYSIS STARTED")
-    print("Session:", session_id)
-    print("Source:", source)
-    print("Language:", language)
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "REELMIND ANALYSIS STARTED"
+    )
+
+    print(
+        "Session:",
+        session_id
+    )
+
+    print(
+        "Source:",
+        source
+    )
+
+    print(
+        "Language:",
+        language
+    )
+
+    print(
+        "=" * 70
+    )
+
     print()
+
 
     try:
 
-        return run_analysis(
-            source=source,
-            language=language,
-            session_id=session_id,
+        # ====================================================
+        # 1. PROCESS INPUT
+        # ====================================================
+
+        print(
+            "[1/6] Processing input..."
         )
+
+        chunks = process_input(
+            source
+        )
+
+
+        if not chunks:
+
+            raise RuntimeError(
+                "No audio chunks were produced."
+            )
+
+
+        print(
+            f"Audio chunks: {len(chunks)}"
+        )
+
+
+        # ====================================================
+        # 2. TRANSCRIPTION
+        # ====================================================
+
+        print()
+        print(
+            "[2/6] Transcribing audio..."
+        )
+
+
+        transcript = transcribe_all(
+
+            chunks,
+
+            language,
+
+        )
+
+
+        if not transcript:
+
+            raise RuntimeError(
+                "Transcription returned empty text."
+            )
+
+
+        print(
+            "Transcript length:",
+            len(transcript)
+        )
+
+
+        # ====================================================
+        # 3. TITLE + SUMMARY
+        # ====================================================
+
+        print()
+        print(
+            "[3/6] Generating title..."
+        )
+
+
+        title = generate_title(
+            transcript
+        )
+
+
+        print(
+            "[3/6] Generating summary..."
+        )
+
+
+        summary = summarize(
+            transcript
+        )
+
+
+        # ====================================================
+        # 4. EXTRACTION
+        # ====================================================
+
+        print()
+        print(
+            "[4/6] Extracting meeting information..."
+        )
+
+
+        action_items = (
+            extract_action_items(
+                transcript
+            )
+        )
+
+
+        decisions = (
+            extract_key_decisions(
+                transcript
+            )
+        )
+
+
+        questions = (
+            extract_questions(
+                transcript
+            )
+        )
+
+
+        # ====================================================
+        # 5. BUILD RAG
+        # ====================================================
+
+        print()
+        print(
+            "[5/6] Building RAG index..."
+        )
+
+
+        rag_chain = build_rag_chain(
+
+            transcript,
+
+            session_id=session_id,
+
+        )
+
+
+        # ====================================================
+        # SAVE SESSION
+        # ====================================================
+
+        sessions[
+            session_id
+        ] = {
+
+            "rag_chain":
+                rag_chain,
+
+            "transcript":
+                transcript,
+
+            "title":
+                title,
+
+            "summary":
+                summary,
+
+            "action_items":
+                action_items,
+
+            "key_decisions":
+                decisions,
+
+            "open_questions":
+                questions,
+
+            "language":
+                language,
+
+            "history":
+                [],
+
+        }
+
+
+        # ====================================================
+        # 6. READY
+        # ====================================================
+
+        print()
+        print(
+            "[6/6] REELMIND READY"
+        )
+
+        print(
+            "Session:",
+            session_id
+        )
+
+        print(
+            "=" * 70
+        )
+
+        print()
+
+
+        return {
+
+            "success":
+                True,
+
+            "session_id":
+                session_id,
+
+            "title":
+                title,
+
+            "transcript":
+                transcript,
+
+            "summary":
+                summary,
+
+            "action_items":
+                action_items,
+
+            "key_decisions":
+                decisions,
+
+            "open_questions":
+                questions,
+
+        }
+
 
     except Exception as e:
 
         print()
-        print("=" * 70)
-        print("REELMIND ANALYZE ERROR")
-        print("Type:", type(e).__name__)
-        print("Message:", str(e))
+        print(
+            "=" * 70
+        )
+
+        print(
+            "REELMIND ANALYZE ERROR"
+        )
+
+        print(
+            "Type:",
+            type(e).__name__
+        )
+
+        print(
+            "Message:",
+            clean_error_message(e)
+        )
+
+        print(
+            "-" * 70
+        )
+
         traceback.print_exc()
-        print("=" * 70)
+
+        print(
+            "=" * 70
+        )
+
         print()
 
+
         raise HTTPException(
+
             status_code=500,
+
             detail=(
                 "Unable to analyze the recording. "
-                "Check the backend terminal for details."
+                "Please check the backend terminal for details."
             ),
+
         )
 
 
@@ -513,14 +660,20 @@ async def upload_file(
     file: UploadFile = File(...)
 ):
 
-    if not file.filename:
-
-        raise HTTPException(
-            status_code=400,
-            detail="No filename was provided.",
-        )
-
     try:
+
+        if not file.filename:
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail=(
+                    "No filename was provided."
+                ),
+
+            )
+
 
         suffix = (
             Path(
@@ -529,6 +682,7 @@ async def upload_file(
             or ".tmp"
         )
 
+
         temp_dir = (
             Path(
                 tempfile.gettempdir()
@@ -536,20 +690,24 @@ async def upload_file(
             / "reelmind"
         )
 
+
         temp_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
 
+
         file_id = str(
             uuid.uuid4()
         )
+
 
         file_path = (
             temp_dir
             /
             f"{file_id}{suffix}"
         )
+
 
         with open(
             file_path,
@@ -561,16 +719,31 @@ async def upload_file(
                 buffer,
             )
 
+
         print(
             "Uploaded:",
             file_path
         )
 
+
         return {
-            "success": True,
-            "path": str(file_path),
-            "filename": file.filename,
+
+            "success":
+                True,
+
+            "path":
+                str(file_path),
+
+            "filename":
+                file.filename,
+
         }
+
+
+    except HTTPException:
+
+        raise
+
 
     except Exception as e:
 
@@ -579,9 +752,15 @@ async def upload_file(
             repr(e)
         )
 
+
         raise HTTPException(
+
             status_code=500,
-            detail="Unable to upload the file.",
+
+            detail=(
+                "Unable to upload the file."
+            ),
+
         )
 
 
@@ -601,13 +780,15 @@ async def analyze_file(
     if not file.filename:
 
         raise HTTPException(
+
             status_code=400,
-            detail="No file was provided.",
+
+            detail=(
+                "No file was provided."
+            ),
+
         )
 
-    language = normalize_language(
-        language
-    )
 
     temp_dir = (
         Path(
@@ -616,10 +797,12 @@ async def analyze_file(
         / "reelmind"
     )
 
+
     temp_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
+
 
     suffix = (
         Path(
@@ -628,9 +811,11 @@ async def analyze_file(
         or ".tmp"
     )
 
+
     file_id = str(
         uuid.uuid4()
     )
+
 
     file_path = (
         temp_dir
@@ -638,23 +823,11 @@ async def analyze_file(
         f"{file_id}{suffix}"
     )
 
-    session_id = str(
-        uuid.uuid4()
-    )
 
     try:
 
-        print()
-        print("=" * 70)
-        print("REELMIND FILE ANALYSIS STARTED")
-        print("Session:", session_id)
-        print("File:", file.filename)
-        print("Language:", language)
-        print("=" * 70)
-        print()
-
         # ----------------------------------------------------
-        # SAVE FILE
+        # SAVE UPLOAD
         # ----------------------------------------------------
 
         with open(
@@ -667,41 +840,275 @@ async def analyze_file(
                 buffer,
             )
 
+
         # ----------------------------------------------------
-        # RUN SAME PIPELINE
+        # SESSION
         # ----------------------------------------------------
 
-        return run_analysis(
-            source=str(file_path),
-            language=language,
-            session_id=session_id,
+        session_id = str(
+            uuid.uuid4()
         )
+
+
+        language = normalize_language(
+            language
+        )
+
+
+        print()
+        print(
+            "=" * 70
+        )
+
+        print(
+            "REELMIND FILE ANALYSIS STARTED"
+        )
+
+        print(
+            "Session:",
+            session_id
+        )
+
+        print(
+            "File:",
+            file_path
+        )
+
+        print(
+            "Language:",
+            language
+        )
+
+        print(
+            "=" * 70
+        )
+
+        print()
+
+
+        # ----------------------------------------------------
+        # 1. PROCESS
+        # ----------------------------------------------------
+
+        print(
+            "[1/6] Processing input..."
+        )
+
+
+        chunks = process_input(
+            str(file_path)
+        )
+
+
+        # ----------------------------------------------------
+        # 2. TRANSCRIBE
+        # ----------------------------------------------------
+
+        print(
+            "[2/6] Transcribing audio..."
+        )
+
+
+        transcript = transcribe_all(
+
+            chunks,
+
+            language,
+
+        )
+
+
+        if not transcript:
+
+            raise RuntimeError(
+                "Transcription returned empty text."
+            )
+
+
+        # ----------------------------------------------------
+        # 3. TITLE + SUMMARY
+        # ----------------------------------------------------
+
+        print(
+            "[3/6] Generating title..."
+        )
+
+
+        title = generate_title(
+            transcript
+        )
+
+
+        print(
+            "[3/6] Generating summary..."
+        )
+
+
+        summary = summarize(
+            transcript
+        )
+
+
+        # ----------------------------------------------------
+        # 4. EXTRACTION
+        # ----------------------------------------------------
+
+        print(
+            "[4/6] Extracting information..."
+        )
+
+
+        action_items = (
+            extract_action_items(
+                transcript
+            )
+        )
+
+
+        decisions = (
+            extract_key_decisions(
+                transcript
+            )
+        )
+
+
+        questions = (
+            extract_questions(
+                transcript
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # 5. RAG
+        # ----------------------------------------------------
+
+        print(
+            "[5/6] Building RAG..."
+        )
+
+
+        rag_chain = build_rag_chain(
+
+            transcript,
+
+            session_id=session_id,
+
+        )
+
+
+        sessions[
+            session_id
+        ] = {
+
+            "rag_chain":
+                rag_chain,
+
+            "transcript":
+                transcript,
+
+            "title":
+                title,
+
+            "summary":
+                summary,
+
+            "action_items":
+                action_items,
+
+            "key_decisions":
+                decisions,
+
+            "open_questions":
+                questions,
+
+            "language":
+                language,
+
+            "history":
+                [],
+
+        }
+
+
+        print(
+            "[6/6] REELMIND READY"
+        )
+
+
+        return {
+
+            "success":
+                True,
+
+            "session_id":
+                session_id,
+
+            "title":
+                title,
+
+            "transcript":
+                transcript,
+
+            "summary":
+                summary,
+
+            "action_items":
+                action_items,
+
+            "key_decisions":
+                decisions,
+
+            "open_questions":
+                questions,
+
+        }
+
 
     except Exception as e:
 
         print()
-        print("=" * 70)
-        print("FILE ANALYSIS ERROR")
-        print(type(e).__name__, str(e))
+        print(
+            "=" * 70
+        )
+
+        print(
+            "FILE ANALYSIS ERROR"
+        )
+
+        print(
+            type(e).__name__,
+            str(e)
+        )
+
         traceback.print_exc()
-        print("=" * 70)
+
+        print(
+            "=" * 70
+        )
+
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
-                "Unable to analyze the uploaded recording. "
-                "Check the backend terminal for details."
+                "Unable to analyze the uploaded recording."
             ),
+
         )
+
 
     finally:
 
         try:
 
             if file_path.exists():
+
                 file_path.unlink()
 
         except Exception:
+
             pass
 
 
@@ -718,99 +1125,162 @@ async def chat(
         request.session_id
     )
 
+
     if not session:
 
         raise HTTPException(
+
             status_code=404,
+
             detail=(
                 "This meeting session has expired. "
                 "Please analyze the recording again."
             ),
+
         )
 
+
     question = (
-        request.question or ""
+        request.question
+        or ""
     ).strip()
+
 
     if not question:
 
         return {
-            "success": True,
-            "answer": "Please ask me something.",
+
+            "success":
+                True,
+
+            "answer":
+                "Please ask me something.",
+
         }
 
-    history = (
-        request.history
-        if isinstance(
-            request.history,
-            list,
-        )
-        else session.get(
-            "history",
-            [],
-        )
-    )
 
     try:
 
-        print()
-        print("=" * 70)
-        print("CHAT QUESTION")
-        print("Language:", normalize_language(
-            request.language
-        ))
-        print(question)
-        print("=" * 70)
-
-        answer = ask_question(
-            session["rag_chain"],
-            question,
-            history=history,
+        history = (
+            request.history
+            if isinstance(
+                request.history,
+                list
+            )
+            else []
         )
 
+
+        print()
+        print(
+            "CHAT QUESTION:"
+        )
+
+        print(
+            question
+        )
+
+
+        answer = ask_question(
+
+            session[
+                "rag_chain"
+            ],
+
+            question,
+
+            history=history,
+
+        )
+
+
         if answer is None:
+
             answer = (
                 "I couldn't generate an answer."
             )
+
 
         answer = str(
             answer
         ).strip()
 
+
         # ----------------------------------------------------
-        # SAVE SERVER HISTORY
+        # SAVE HISTORY
         # ----------------------------------------------------
 
-        session["history"].append({
-            "role": "user",
-            "content": question,
+        session[
+            "history"
+        ].append({
+
+            "role":
+                "user",
+
+            "content":
+                question,
+
         })
 
-        session["history"].append({
-            "role": "assistant",
-            "content": answer,
+
+        session[
+            "history"
+        ].append({
+
+            "role":
+                "assistant",
+
+            "content":
+                answer,
+
         })
+
 
         return {
-            "success": True,
-            "answer": answer,
+
+            "success":
+                True,
+
+            "answer":
+                answer,
+
         }
+
 
     except Exception as e:
 
         print()
-        print("=" * 70)
-        print("CHAT ERROR")
-        print(type(e).__name__, str(e))
+        print(
+            "=" * 70
+        )
+
+        print(
+            "CHAT ERROR"
+        )
+
+        print(
+            type(e).__name__,
+            str(e)
+        )
+
         traceback.print_exc()
-        print("=" * 70)
+
+        print(
+            "=" * 70
+        )
+
 
         return {
-            "success": False,
-            "answer": (
-                "I couldn't answer that right now. "
-                "Please try again."
-            ),
+
+            "success":
+                False,
+
+            "answer":
+                (
+                    "I couldn't answer that right now. "
+                    "Please try asking the question again."
+                ),
+
         }
 
 
@@ -824,12 +1294,17 @@ FRONTEND_DIR = (
     "frontend"
 )
 
+
 if FRONTEND_DIR.exists():
 
     app.mount(
+
         "/frontend",
+
         StaticFiles(
             directory=FRONTEND_DIR
         ),
+
         name="frontend",
+
     )
