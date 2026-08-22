@@ -15,9 +15,7 @@ langchain-community
 langchain-text-splitters
 langchain-chroma
 langchain-mistralai
-langchain-huggingface
 
 chromadb
-sentence-transformers
 
 pydantic

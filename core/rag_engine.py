@@ -1,13 +1,16 @@
-# core/rag_engine.py
+# ============================================================
+# REELMIND - LIGHTWEIGHT RAG ENGINE
+# ============================================================
 
 import os
 from pathlib import Path
 from typing import Optional
 
+import requests
+
 from dotenv import load_dotenv
 
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_mistralai import ChatMistralAI
@@ -18,21 +21,189 @@ from langchain_mistralai import ChatMistralAI
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 ENV_FILE = PROJECT_ROOT / ".env"
 
 load_dotenv(ENV_FILE)
 
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+
+MISTRAL_API_KEY = os.getenv(
+    "MISTRAL_API_KEY"
+)
 
 MISTRAL_MODEL = os.getenv(
     "MISTRAL_MODEL",
     "mistral-small-latest"
 )
 
+MISTRAL_EMBED_MODEL = os.getenv(
+    "MISTRAL_EMBED_MODEL",
+    "mistral-embed"
+)
+
+MISTRAL_EMBED_URL = (
+    "https://api.mistral.ai/v1/embeddings"
+)
+
+
 if MISTRAL_API_KEY:
-    print("✓ Mistral API key loaded")
+
+    print(
+        "✓ Mistral API key loaded"
+    )
+
 else:
-    print("✗ MISTRAL_API_KEY not found")
+
+    print(
+        "✗ MISTRAL_API_KEY not found"
+    )
+
+
+# ============================================================
+# MISTRAL API EMBEDDINGS
+# ============================================================
+
+class MistralAPIEmbeddings:
+    """
+    Lightweight LangChain-compatible embeddings.
+
+    IMPORTANT:
+    This does NOT load a local embedding model.
+
+    Embeddings are generated remotely by
+    the Mistral API.
+
+    This keeps deployment RAM very low.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "mistral-embed",
+    ):
+
+        if not api_key:
+
+            raise RuntimeError(
+                "MISTRAL_API_KEY is not configured."
+            )
+
+        self.api_key = api_key
+
+        self.model = model
+
+    # --------------------------------------------------------
+    # EMBED DOCUMENTS
+    # --------------------------------------------------------
+
+    def embed_documents(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+
+        if not texts:
+            return []
+
+        headers = {
+
+            "Authorization":
+                f"Bearer {self.api_key}",
+
+            "Content-Type":
+                "application/json",
+
+        }
+
+        payload = {
+
+            "model":
+                self.model,
+
+            "input":
+                texts,
+
+        }
+
+        response = requests.post(
+
+            MISTRAL_EMBED_URL,
+
+            headers=headers,
+
+            json=payload,
+
+            timeout=120,
+
+        )
+
+        if not response.ok:
+
+            print(
+                "Mistral embeddings error:",
+                response.status_code,
+                response.text,
+            )
+
+            raise RuntimeError(
+                "Mistral embeddings API failed: "
+                f"{response.status_code}"
+            )
+
+        result = response.json()
+
+        data = result.get(
+            "data",
+            []
+        )
+
+        # Mistral returns objects with
+        # index + embedding.
+        data = sorted(
+            data,
+            key=lambda item:
+                item.get("index", 0)
+        )
+
+        return [
+            item["embedding"]
+            for item in data
+        ]
+
+    # --------------------------------------------------------
+    # EMBED QUERY
+    # --------------------------------------------------------
+
+    def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+
+        embeddings = self.embed_documents(
+            [text]
+        )
+
+        if not embeddings:
+
+            raise RuntimeError(
+                "Mistral returned an empty embedding."
+            )
+
+        return embeddings[0]
+
+
+# ============================================================
+# EMBEDDINGS FACTORY
+# ============================================================
+
+def get_embeddings():
+
+    return MistralAPIEmbeddings(
+
+        api_key=MISTRAL_API_KEY,
+
+        model=MISTRAL_EMBED_MODEL,
+
+    )
 
 
 # ============================================================
@@ -44,31 +215,19 @@ def get_llm(
 ):
 
     if not MISTRAL_API_KEY:
+
         raise RuntimeError(
             "MISTRAL_API_KEY is not configured."
         )
 
     return ChatMistralAI(
+
         model=MISTRAL_MODEL,
+
         mistral_api_key=MISTRAL_API_KEY,
+
         temperature=temperature,
-    )
 
-
-# ============================================================
-# EMBEDDINGS
-# ============================================================
-
-def get_embeddings():
-
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={
-            "device": "cpu"
-        },
-        encode_kwargs={
-            "normalize_embeddings": True
-        },
     )
 
 
@@ -81,21 +240,28 @@ def create_documents(
 ):
 
     if not transcript or not transcript.strip():
+
         raise ValueError(
             "Transcript is empty."
         )
 
     splitter = RecursiveCharacterTextSplitter(
+
         chunk_size=1200,
+
         chunk_overlap=200,
+
         separators=[
+
             "\n\n",
             "\n",
             ". ",
             "? ",
             "! ",
             " ",
+
         ],
+
     )
 
     chunks = splitter.split_text(
@@ -104,19 +270,31 @@ def create_documents(
 
     documents = []
 
-    for index, chunk in enumerate(chunks):
+    for index, chunk in enumerate(
+        chunks
+    ):
 
         if not chunk.strip():
             continue
 
         documents.append(
+
             Document(
+
                 page_content=chunk,
+
                 metadata={
-                    "source": "meeting_transcript",
-                    "chunk_index": index,
+
+                    "source":
+                        "meeting_transcript",
+
+                    "chunk_index":
+                        index,
+
                 },
+
             )
+
         )
 
     return documents
@@ -136,16 +314,30 @@ def build_vector_store(
     )
 
     collection_name = (
+
         f"reelmind_{session_id}"
+
         if session_id
+
         else "reelmind_default"
+
+    )
+
+    print()
+    print(
+        "Creating Mistral embeddings..."
     )
 
     embeddings = get_embeddings()
 
     vector_store = Chroma(
-        collection_name=collection_name,
-        embedding_function=embeddings,
+
+        collection_name=
+            collection_name,
+
+        embedding_function=
+            embeddings,
+
     )
 
     vector_store.add_documents(
@@ -170,8 +362,11 @@ def build_rag_chain(
 ):
 
     vector_store = build_vector_store(
+
         transcript,
+
         session_id=session_id,
+
     )
 
     return vector_store
@@ -190,8 +385,11 @@ def retrieve_context(
     try:
 
         documents = vector_store.similarity_search(
+
             question,
+
             k=k,
+
         )
 
         return documents
@@ -215,11 +413,15 @@ def format_context(
 ):
 
     if not documents:
+
         return ""
 
     return "\n\n---\n\n".join(
+
         doc.page_content
+
         for doc in documents
+
     )
 
 
@@ -232,12 +434,12 @@ def format_history(
 ):
 
     if not history:
-        return "No previous conversation."
+
+        return (
+            "No previous conversation."
+        )
 
     lines = []
-
-    # Only use recent conversation.
-    # This prevents huge prompts.
 
     for message in history[-8:]:
 
@@ -255,19 +457,24 @@ def format_history(
             continue
 
         if role == "assistant":
+
             role_name = "Assistant"
+
         else:
+
             role_name = "User"
 
         lines.append(
+
             f"{role_name}: {content}"
+
         )
 
     return "\n".join(lines)
 
 
 # ============================================================
-# DETERMINE WHETHER QUESTION IS MEETING-SPECIFIC
+# DETERMINE MEETING QUESTION
 # ============================================================
 
 def is_meeting_question(
@@ -277,6 +484,7 @@ def is_meeting_question(
 ):
 
     if not context.strip():
+
         return False
 
     llm = get_llm(
@@ -284,51 +492,50 @@ def is_meeting_question(
     )
 
     prompt = f"""
+
 You are deciding whether a user's question should be answered
 using a meeting/video transcript or using general knowledge.
 
-MEETING TRANSCRIPT CONTEXT:
-{context}
-
-RECENT CONVERSATION:
-{history}
-
-CURRENT USER QUESTION:
-{question}
-
-Return ONLY one of:
+Return ONLY:
 
 MEETING
+
+or
+
 GENERAL
 
-Choose MEETING when the user is referring to the recording,
-meeting, transcript, discussion, speaker, decision, explanation,
-example, outcome, or something that happened in the video.
 
-Examples of MEETING:
-- "what did they decide?"
-- "what was the outcome?"
-- "video me kya explain kiya?"
-- "meeting mein kisne ye bola?"
-- "according to the video..."
-- "what was discussed about linked lists?"
-- "iske baare mein video mein kya bola tha?"
+MEETING examples:
 
-Choose GENERAL when the user is simply asking for knowledge
-or an explanation without referring to the recording.
+- what did they decide?
+- what was the outcome?
+- video me kya explain kiya?
+- meeting mein kisne ye bola?
+- according to the video...
+- what was discussed?
+- iske baare mein video mein kya bola?
 
-Examples of GENERAL:
-- "what is a linked list?"
-- "explain binary trees"
-- "what is recursion?"
-- "how does a database work?"
-- "python kya hai?"
 
-If the user uses Hinglish, Hindi, informal language,
-spelling mistakes, or short phrases, understand the meaning.
+GENERAL examples:
 
-Do NOT classify a question as MEETING merely because the same
-topic happens to appear in the transcript.
+- what is a linked list?
+- explain binary trees
+- what is recursion?
+- how does a database work?
+- python kya hai?
+
+
+USER QUESTION:
+{question}
+
+
+MEETING CONTEXT:
+{context}
+
+
+RECENT HISTORY:
+{history}
+
 """
 
     try:
@@ -359,10 +566,8 @@ topic happens to appear in the transcript.
             repr(e)
         )
 
-        # Safe fallback:
-        # explicit meeting references are treated as meeting.
-
         meeting_words = [
+
             "video",
             "meeting",
             "transcript",
@@ -381,13 +586,19 @@ topic happens to appear in the transcript.
             "meeting mein",
             "video mein",
             "video wale",
+
         ]
 
-        question_lower = question.lower()
+        question_lower = (
+            question.lower()
+        )
 
         return any(
+
             word in question_lower
+
             for word in meeting_words
+
         )
 
 
@@ -406,61 +617,61 @@ def answer_from_meeting(
     )
 
     prompt = f"""
-You are REELMIND, an intelligent meeting/video assistant.
 
-Answer the user's question using the meeting context.
+You are REELMIND, an intelligent
+meeting/video assistant.
+
+Answer the user's question using
+the meeting context.
 
 MEETING CONTEXT:
+
 {context}
 
+
 RECENT CONVERSATION:
+
 {history}
 
+
 USER QUESTION:
+
 {question}
+
 
 RULES:
 
-1. Use the meeting context as the factual source for
-   meeting-specific information.
+1. Use the meeting context as the
+   factual source.
 
-2. Understand the meaning of the question even when it is:
-   - Hindi
-   - English
-   - Hinglish
-   - informal
-   - grammatically incorrect
-   - short
+2. Understand Hindi, English,
+   Hinglish and informal wording.
 
-3. Do not require exact transcript wording.
+3. Do not require exact transcript
+   wording.
 
-4. If the user asks for an explanation, explain the concept
-   clearly instead of simply copying the transcript.
+4. Explain concepts clearly when
+   requested.
 
-5. If the user asks:
-   "what was the outcome?"
-   identify the outcome from the meeting.
+5. Identify outcomes when asked.
 
-6. If the user asks:
-   "what did they decide?"
-   identify the decision from the meeting.
+6. Identify decisions when asked.
 
-7. If the user asks:
-   "why?"
-   explain the reason using the available context.
+7. Explain reasons when asked.
 
 8. Never invent information.
 
-9. If the meeting context genuinely does not contain the
-   requested information, say:
-   "The recording doesn't provide enough information about that."
+9. If the recording genuinely does
+   not contain the answer, say:
 
-10. Match the user's language naturally.
+"The recording doesn't provide enough
+information about that."
 
-11. Do not mention RAG, embeddings, vector stores,
-    retrieval, prompts, or internal implementation.
+10. Match the user's language.
 
-12. Do not output technical errors.
+11. Never mention internal RAG,
+    embeddings or vector stores.
+
 """
 
     response = llm.invoke(
@@ -484,29 +695,34 @@ def answer_generally(
     )
 
     prompt = f"""
-You are REELMIND, a helpful conversational AI assistant.
 
-The user is asking a general question, not a question that
-requires information from the meeting recording.
+You are REELMIND, a helpful
+conversational AI assistant.
+
+The user is asking a general
+question rather than a question
+requiring the meeting recording.
 
 RECENT CONVERSATION:
+
 {history}
 
+
 USER QUESTION:
+
 {question}
 
-Answer naturally and helpfully.
 
 Requirements:
 
-- Understand Hindi, English and Hinglish.
-- Understand informal wording and spelling mistakes.
-- If the user asks for a simple explanation, explain simply.
-- If the user asks for technical information, give a useful
-  technical explanation.
-- Do not mention the transcript unless necessary.
-- Do not say that information is missing from the transcript.
+- Understand Hindi.
+- Understand English.
+- Understand Hinglish.
+- Understand informal wording.
+- Explain simply when requested.
 - Match the user's language.
+- Be helpful and natural.
+
 """
 
     response = llm.invoke(
@@ -540,22 +756,18 @@ def ask_question(
 
     try:
 
-        # ----------------------------------------------------
-        # Recent conversation
-        # ----------------------------------------------------
-
-        formatted_history = format_history(
-            history
+        formatted_history = (
+            format_history(history)
         )
 
-        # ----------------------------------------------------
-        # Retrieve transcript
-        # ----------------------------------------------------
-
         documents = retrieve_context(
+
             rag_chain,
+
             question,
+
             k=5,
+
         )
 
         context = format_context(
@@ -563,43 +775,44 @@ def ask_question(
         )
 
         print(
-            f"\nRetrieved {len(documents)} transcript chunks."
+            f"\nRetrieved "
+            f"{len(documents)} "
+            f"transcript chunks."
         )
 
-        # ----------------------------------------------------
-        # Decide intent
-        # ----------------------------------------------------
+        meeting_question = (
+            is_meeting_question(
 
-        meeting_question = is_meeting_question(
-            question,
-            context,
-            formatted_history,
+                question,
+
+                context,
+
+                formatted_history,
+
+            )
         )
-
-        # ----------------------------------------------------
-        # Meeting / RAG
-        # ----------------------------------------------------
 
         if meeting_question:
 
             return answer_from_meeting(
+
                 question,
+
                 context,
+
                 formatted_history,
+
             )
 
-        # ----------------------------------------------------
-        # General LLM
-        # ----------------------------------------------------
-
         return answer_generally(
+
             question,
+
             formatted_history,
+
         )
 
     except Exception as e:
-
-        # NEVER send technical details to the frontend.
 
         print(
             "\n================ RAG ERROR ================"
@@ -615,6 +828,9 @@ def ask_question(
         )
 
         return (
-            "I'm having trouble processing that right now. "
+
+            "I'm having trouble "
+            "processing that right now. "
             "Please try again in a moment."
+
         )
