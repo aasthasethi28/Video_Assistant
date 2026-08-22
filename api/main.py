@@ -4,6 +4,7 @@ import re
 import html
 import shutil
 import tempfile
+import time
 import traceback
 
 from pathlib import Path
@@ -97,6 +98,46 @@ def _youtube_is_auth_error(exc: Exception) -> bool:
     return any(marker in message for marker in markers)
 
 
+def _resolve_youtube_cookiefile() -> Optional[Path]:
+    """
+    Resolve a Netscape-format cookies.txt to hand to yt-dlp.
+
+    Two ways to supply cookies, because Render (and most PaaS hosts)
+    don't give you a persistent place to hand-upload a file:
+
+      1. YOUTUBE_COOKIES_FILE - an absolute path to a cookies.txt that
+         already exists on disk (e.g. mounted via a Render Secret File).
+      2. YOUTUBE_COOKIES_CONTENT - the *raw contents* of a cookies.txt
+         pasted directly into an environment variable. This is written
+         out to a temp file on first use.
+
+    Cookies are the actual fix here, not a client-string trick: YouTube
+    increasingly treats requests from datacenter IPs (which is what
+    Render uses) as suspicious regardless of player client, and only
+    a cookie file from a real logged-in session reliably clears that
+    check. Export cookies.txt from a private/incognito browser window
+    (e.g. the "Get cookies.txt LOCALLY" extension) and DO NOT log out
+    of that browser afterwards, or the exported session dies with it.
+    """
+    file_path = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    if file_path:
+        path_obj = Path(file_path)
+        if path_obj.exists():
+            return path_obj
+        print(f"YOUTUBE_COOKIES_FILE was set but not found at: {file_path}")
+
+    raw_content = os.getenv("YOUTUBE_COOKIES_CONTENT", "").strip()
+    if raw_content:
+        temp_path = Path(tempfile.gettempdir()) / "youtube_cookies.txt"
+        try:
+            temp_path.write_text(raw_content, encoding="utf-8")
+            return temp_path
+        except Exception as exc:
+            print("Failed to write YOUTUBE_COOKIES_CONTENT to disk:", exc)
+
+    return None
+
+
 def _download_youtube_audio_api(url: str) -> str:
     """
     Server-side YouTube audio extraction.
@@ -108,8 +149,8 @@ def _download_youtube_audio_api(url: str) -> str:
     download_dir = PROJECT_ROOT / "downloads"
     download_dir.mkdir(parents=True, exist_ok=True)
 
-    cookie_file = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
-    cookie_file_path = Path(cookie_file) if cookie_file else None
+    cookie_file_path = _resolve_youtube_cookiefile()
+    has_cookies = bool(cookie_file_path and cookie_file_path.exists())
 
     base_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
@@ -117,9 +158,10 @@ def _download_youtube_audio_api(url: str) -> str:
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
-        "retries": 2,
-        "fragment_retries": 2,
+        "retries": 3,
+        "fragment_retries": 3,
         "socket_timeout": 30,
+        "sleep_interval_requests": 1,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -136,23 +178,37 @@ def _download_youtube_audio_api(url: str) -> str:
         ],
     }
 
-    if cookie_file_path and cookie_file_path.exists():
+    if has_cookies:
         base_opts["cookiefile"] = str(cookie_file_path)
         print("YouTube cookies: enabled")
     else:
-        print("YouTube cookies: not configured")
+        print(
+            "YouTube cookies: not configured "
+            "(set YOUTUBE_COOKIES_FILE or YOUTUBE_COOKIES_CONTENT)"
+        )
 
-    # Keep the attempts conservative. If YouTube requires account
-    # authentication/PO tokens, yt-dlp cannot manufacture those on Render.
-    client_attempts = [
-        ["android_vr"],
-        ["web_embedded"],
-        ["web_safari"],
-    ]
+    # Which client works shifts every few weeks as YouTube adjusts trust
+    # signals — this list is a moving target, not a permanent fix.
+    # Notably: don't pair a real cookie session with the "tv" client;
+    # the TV client authenticates differently and the mismatch tends to
+    # invalidate the very session the cookies came from.
+    if has_cookies:
+        client_attempts = [
+            ["web"],
+            ["android"],
+            ["web_embedded"],
+        ]
+    else:
+        client_attempts = [
+            ["android"],
+            ["ios"],
+            ["web_embedded"],
+            ["web_safari"],
+        ]
 
     last_error = None
 
-    for clients in client_attempts:
+    for attempt_index, clients in enumerate(client_attempts):
         opts = dict(base_opts)
         opts["extractor_args"] = {
             "youtube": {
@@ -205,12 +261,33 @@ def _download_youtube_audio_api(url: str) -> str:
                 type(exc).__name__,
                 str(exc),
             )
+            # Small backoff between client retries so we don't look like
+            # a burst of automated requests on top of everything else.
+            if attempt_index < len(client_attempts) - 1:
+                time.sleep(2)
+            continue
 
-            if cookie_file_path and cookie_file_path.exists():
-                # A supplied cookie file should be treated as the user's
-                # intended authentication source; further client retries
-                # are still attempted but the final error remains explicit.
-                continue
+    if last_error is not None and _youtube_is_auth_error(last_error):
+        guidance = (
+            "YouTube is blocking this server's IP as a bot"
+            + (
+                " even with cookies configured — the cookie session may"
+                " be stale or logged out. Re-export cookies.txt from a"
+                " private/incognito window (don't log out of that"
+                " browser afterwards) and update YOUTUBE_COOKIES_FILE /"
+                " YOUTUBE_COOKIES_CONTENT."
+                if has_cookies
+                else ". Render's IPs are datacenter IPs, which YouTube"
+                " treats far more strictly than a home connection — no"
+                " player-client trick reliably clears this alone. Export"
+                " cookies.txt from a real, logged-in YouTube session in a"
+                " private/incognito browser window, then set it via the"
+                " YOUTUBE_COOKIES_CONTENT (paste the file contents) or"
+                " YOUTUBE_COOKIES_FILE (path to an uploaded/secret file)"
+                " environment variable on Render."
+            )
+        )
+        raise RuntimeError(guidance) from last_error
 
     if last_error is None:
         raise RuntimeError("YouTube audio extraction failed.")
