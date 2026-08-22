@@ -19,7 +19,7 @@
 
 const API_BASE = (
     localStorage.getItem("reelmind_api_base")
-    || "http://127.0.0.1:8000"
+    || "https://video-assistant-jzzm.onrender.com"
 ).replace(/\/$/, "");
 
 
