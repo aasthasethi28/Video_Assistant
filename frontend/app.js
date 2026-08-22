@@ -1,1655 +1,1454 @@
-/* ============================================================
-   REELMIND FRONTEND
-   ============================================================
-   STT ROUTING:
-   English  -> Hugging Face Whisper API
-   Hinglish -> Sarvam Saaras v3 (codemix)
+(() => {
+    "use strict";
 
-   IMPORTANT:
-   API keys are NEVER stored in this file.
-   They stay inside backend .env.
-============================================================ */
-
-"use strict";
+    /* ============================================================
+       REELMIND FRONTEND
+       ============================================================
+       Compatible with:
+       - frontend/index.html
+       - frontend/style.css
+       - FastAPI backend on Render
+    ============================================================ */
 
 
-/* ============================================================
-   CONFIG
-============================================================ */
+    /* ============================================================
+       CONFIG
+    ============================================================ */
 
-const API_BASE = (
-    localStorage.getItem("reelmind_api_base")
-    || "https://video-assistant-jzzm.onrender.com"
-).replace(/\/$/, "");
-
-
-/* ============================================================
-   STATE
-============================================================ */
-
-const state = {
-    sourceType: "url",
-    language: "english",
-    file: null,
-    sessionId: null,
-    analyzing: false,
-    analyzed: false,
-    history: [],
-};
+    const API_BASE = (
+        localStorage.getItem("reelmind_api_base") ||
+        "https://video-assistant-jzzm.onrender.com"
+    ).replace(/\/$/, "");
 
 
-/* ============================================================
-   DOM ELEMENTS
-============================================================ */
+    /* ============================================================
+       STATE
+    ============================================================ */
 
-const $ = (id) =>
-    document.getElementById(id);
-
-
-const linkTab =
-    $("linkTab");
-
-const uploadTab =
-    $("uploadTab");
-
-const linkSource =
-    $("linkSource");
-
-const uploadSource =
-    $("uploadSource");
-
-const urlInput =
-    $("urlInput");
-
-const fileInput =
-    $("fileInput");
-
-const uploadBox =
-    $("uploadBox");
-
-const selectedFile =
-    $("selectedFile");
-
-const englishBtn =
-    $("englishBtn");
-
-const hinglishBtn =
-    $("hinglishBtn");
-
-const analyzeBtn =
-    $("analyzeBtn");
-
-const analyzeText =
-    $("analyzeText");
-
-const errorBox =
-    $("errorBox");
-
-const statusBadge =
-    $("statusBadge");
-
-const statusText =
-    $("statusText");
-
-const emptyState =
-    $("emptyState");
-
-const results =
-    $("results");
-
-const meetingTitle =
-    $("meetingTitle");
-
-const transcript =
-    $("transcript");
-
-const summary =
-    $("summary");
-
-const decisions =
-    $("decisions");
-
-const outcomes =
-    $("outcomes");
-
-const chatMessages =
-    $("chatMessages");
-
-const chatEmpty =
-    $("chatEmpty");
-
-const chatForm =
-    $("chatForm");
-
-const chatInput =
-    $("chatInput");
-
-const sendBtn =
-    $("sendBtn");
-
-const sessionLabel =
-    $("sessionLabel");
-
-const pipelineSteps =
-    document.querySelectorAll(
-        ".pipeline-step"
-    );
-
-const waveLoader =
-    document.querySelector(
-        ".wave-loader"
-    );
+    const state = {
+        sourceMode: "url",
+        language: "english",
+        file: null,
+        sessionId: null,
+        busy: false,
+        stepTimer: null
+    };
 
 
-/* ============================================================
-   HTML / TEXT HELPERS
-============================================================ */
+    /* ============================================================
+       HELPERS
+    ============================================================ */
 
-function escapeHTML(value) {
-
-    return String(
-        value ?? ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-}
+    const el = (id) =>
+        document.getElementById(id);
 
 
-function formatText(value) {
+    /* ============================================================
+       DOM ELEMENTS
+    ============================================================ */
 
-    return escapeHTML(
-        value ?? ""
-    ).replaceAll(
-        "\n",
-        "<br>"
-    );
-}
+    const settingsBtn =
+        el("settingsBtn");
+
+    const settingsDrawer =
+        el("settingsDrawer");
+
+    const apiBaseInput =
+        el("apiBase");
+
+    const saveApiBase =
+        el("saveApiBase");
+
+    const statusPill =
+        el("statusPill");
+
+    const statusText =
+        el("statusText");
+
+    const tabs =
+        document.querySelectorAll(".tab");
+
+    const panelUrl =
+        el("panel-url");
+
+    const panelFile =
+        el("panel-file");
+
+    const sourceUrlInput =
+        el("sourceUrl");
+
+    const dropzone =
+        el("dropzone");
+
+    const dropzoneText =
+        el("dropzoneText");
+
+    const fileInput =
+        el("fileInput");
+
+    const langBtns =
+        document.querySelectorAll(".lang-btn");
+
+    const runBtn =
+        el("runBtn");
+
+    const errorLine =
+        el("errorLine");
+
+    const stepsList =
+        el("steps");
+
+    const waveform =
+        el("waveform");
+
+    const emptyState =
+        el("emptyState");
+
+    const results =
+        el("results");
+
+    const resultTitle =
+        el("resultTitle");
+
+    const outSummary =
+        el("outSummary");
+
+    const outActions =
+        el("outActions");
+
+    const outDecisions =
+        el("outDecisions");
+
+    const outQuestions =
+        el("outQuestions");
+
+    const outTranscript =
+        el("outTranscript");
+
+    const resultTabs =
+        document.querySelectorAll(".rtab");
+
+    const chatDock =
+        el("chatDock");
+
+    const chatSession =
+        el("chatSession");
+
+    const chatLog =
+        el("chatLog");
+
+    const chatForm =
+        el("chatForm");
+
+    const chatInput =
+        el("chatInput");
+
+    const chatSend =
+        el("chatSend");
 
 
-/* ============================================================
-   STATUS
-============================================================ */
+    /* ============================================================
+       INITIAL SETTINGS
+    ============================================================ */
 
-function setStatus(
-    mode,
-    text
-) {
-
-    if (!statusBadge) {
-        return;
+    if (apiBaseInput) {
+        apiBaseInput.value = API_BASE;
     }
 
-    statusBadge.classList.remove(
-        "processing",
-        "ready",
-        "error"
-    );
 
-    if (mode) {
+    /* ============================================================
+       SETTINGS
+    ============================================================ */
 
-        statusBadge.classList.add(
-            mode
-        );
-    }
+    settingsBtn?.addEventListener(
+        "click",
+        () => {
 
-    if (statusText) {
-
-        statusText.textContent =
-            text;
-    }
-}
-
-
-/* ============================================================
-   ERROR HANDLING
-============================================================ */
-
-function showError(
-    message
-) {
-
-    console.error(
-        message
-    );
-
-    if (errorBox) {
-
-        errorBox.textContent =
-            String(message);
-
-        errorBox.classList.remove(
-            "hidden"
-        );
-
-        errorBox.style.display =
-            "block";
-    }
-
-    setStatus(
-        "error",
-        "ERROR"
-    );
-}
-
-
-function clearError() {
-
-    if (errorBox) {
-
-        errorBox.textContent =
-            "";
-
-        errorBox.classList.add(
-            "hidden"
-        );
-
-        errorBox.style.display =
-            "none";
-    }
-}
-
-
-async function readError(
-    response
-) {
-
-    const text =
-        await response.text();
-
-    if (!text) {
-
-        return (
-            `Request failed (${response.status})`
-        );
-    }
-
-    try {
-
-        const data =
-            JSON.parse(text);
-
-        if (
-            typeof data ===
-            "string"
-        ) {
-
-            return data;
-        }
-
-        if (
-            typeof data.detail ===
-            "string"
-        ) {
-
-            return data.detail;
-        }
-
-        if (
-            Array.isArray(
-                data.detail
-            )
-        ) {
-
-            return data.detail
-                .map(
-                    (item) => {
-
-                        if (
-                            typeof item ===
-                            "string"
-                        ) {
-
-                            return item;
-                        }
-
-                        return (
-                            item.msg
-                            ||
-                            JSON.stringify(
-                                item
-                            )
-                        );
-                    }
-                )
-                .join("\n");
-        }
-
-        if (data.message) {
-
-            return data.message;
-        }
-
-        if (data.error) {
-
-            return typeof data.error ===
-                "string"
-                ? data.error
-                : JSON.stringify(
-                    data.error
-                );
-        }
-
-        return JSON.stringify(
-            data,
-            null,
-            2
-        );
-
-    } catch {
-
-        return text;
-    }
-}
-
-
-/* ============================================================
-   PIPELINE
-============================================================ */
-
-function setPipeline(
-    currentStep,
-    errorStep = null
-) {
-
-    pipelineSteps.forEach(
-        (step) => {
-
-            const number =
-                Number(
-                    step.dataset.step
+            const hidden =
+                settingsDrawer.hasAttribute(
+                    "hidden"
                 );
 
-            step.classList.remove(
-                "active",
-                "done",
-                "error"
+            if (hidden) {
+                settingsDrawer.removeAttribute(
+                    "hidden"
+                );
+            } else {
+                settingsDrawer.setAttribute(
+                    "hidden",
+                    ""
+                );
+            }
+
+            settingsBtn.setAttribute(
+                "aria-expanded",
+                String(hidden)
             );
+        }
+    );
 
-            if (
-                errorStep &&
-                number === errorStep
-            ) {
 
-                step.classList.add(
-                    "error"
-                );
+    saveApiBase?.addEventListener(
+        "click",
+        () => {
 
+            const value =
+                apiBaseInput.value
+                    .trim()
+                    .replace(/\/$/, "");
+
+            if (!value) {
                 return;
             }
 
-            if (
-                number <
-                currentStep
-            ) {
-
-                step.classList.add(
-                    "done"
-                );
-
-            } else if (
-                number ===
-                currentStep
-            ) {
-
-                step.classList.add(
-                    "active"
-                );
-            }
-        }
-    );
-}
-
-
-function finishPipeline() {
-
-    pipelineSteps.forEach(
-        (step) => {
-
-            step.classList.remove(
-                "active",
-                "error"
+            localStorage.setItem(
+                "reelmind_api_base",
+                value
             );
 
-            step.classList.add(
-                "done"
+            apiBaseInput.value =
+                value;
+
+            setStatus(
+                "ready",
+                "API saved"
             );
         }
     );
 
-    waveLoader?.classList.remove(
-        "active"
-    );
-}
 
-
-/* ============================================================
-   SOURCE SWITCHING
-============================================================ */
-
-function setSource(
-    type
-) {
-
-    state.sourceType =
-        type;
-
-    const isURL =
-        type === "url";
-
-    linkTab?.classList.toggle(
-        "active",
-        isURL
-    );
-
-    uploadTab?.classList.toggle(
-        "active",
-        !isURL
-    );
-
-    linkSource?.classList.toggle(
-        "hidden",
-        !isURL
-    );
-
-    uploadSource?.classList.toggle(
-        "hidden",
-        isURL
-    );
-
-    if (isURL) {
-
-        state.file =
-            null;
-
-        if (fileInput) {
-
-            fileInput.value =
-                "";
-        }
-
-        selectedFile?.classList.add(
-            "hidden"
-        );
-    }
-}
-
-
-/* ============================================================
-   LANGUAGE
-============================================================ */
-
-function setLanguage(
-    language
-) {
-
-    state.language =
-        language;
-
-    const isEnglish =
-        language === "english";
-
-    englishBtn?.classList.toggle(
-        "active",
-        isEnglish
-    );
-
-    hinglishBtn?.classList.toggle(
-        "active",
-        !isEnglish
-    );
-
-    console.log(
-        "Selected language:",
-        state.language
-    );
-
-    /*
-       ENGINE ROUTING:
-
-       English
-       -> Hugging Face Whisper API
-
-       Hinglish
-       -> Sarvam Saaras v3
-          mode = codemix
-    */
-
-    if (language === "english") {
-
-        console.log(
-            "STT ENGINE: Hugging Face Whisper API"
-        );
-
-    } else {
-
-        console.log(
-            "STT ENGINE: Sarvam Saaras v3 / codemix"
-        );
-    }
-}
-
-
-/* ============================================================
-   FILE HANDLING
-============================================================ */
-
-function setFile(
-    file
-) {
-
-    if (!file) {
-        return;
-    }
-
-    const valid =
-        file.type.startsWith(
-            "audio/"
-        )
-        ||
-        file.type.startsWith(
-            "video/"
-        );
-
-    if (!valid) {
-
-        showError(
-            "Please select a valid audio or video file."
-        );
-
-        return;
-    }
-
-    state.file =
-        file;
-
-    clearError();
-
-    if (selectedFile) {
-
-        selectedFile.textContent =
-            file.name;
-
-        selectedFile.classList.remove(
-            "hidden"
-        );
-    }
-
-    console.log(
-        "Selected file:",
-        file.name
-    );
-}
-
-
-/* ============================================================
-   API: ANALYZE YOUTUBE URL
-============================================================ */
-
-async function analyzeURL() {
-
-    const source =
-        urlInput?.value?.trim();
-
-    if (!source) {
-
-        throw new Error(
-            "Please enter a YouTube URL."
-        );
-    }
-
-    if (
-        !source.startsWith(
-            "http://"
-        )
-        &&
-        !source.startsWith(
-            "https://"
-        )
-    ) {
-
-        throw new Error(
-            "Please enter a valid URL starting with http:// or https://."
-        );
-    }
-
-    const payload = {
-
-        source:
-            source,
-
-        language:
-            state.language,
-
-    };
-
-    console.log(
-        "ANALYZE PAYLOAD:",
-        payload
-    );
-
-    const response =
-        await fetch(
-            `${API_BASE}/api/analyze`,
-            {
-
-                method:
-                    "POST",
-
-                headers: {
-
-                    "Content-Type":
-                        "application/json",
-
-                    "Accept":
-                        "application/json",
-
-                },
-
-                body:
-                    JSON.stringify(
-                        payload
-                    ),
-
-            }
-        );
-
-    if (!response.ok) {
-
-        throw new Error(
-            await readError(
-                response
-            )
-        );
-    }
-
-    return response.json();
-}
-
-
-/* ============================================================
-   API: ANALYZE UPLOADED FILE
-============================================================ */
-
-async function analyzeFile() {
-
-    if (!state.file) {
-
-        throw new Error(
-            "Please choose an audio or video file."
-        );
-    }
-
-    const form =
-        new FormData();
-
-    form.append(
-        "file",
-        state.file
-    );
-
-    form.append(
-        "language",
-        state.language
-    );
-
-    console.log(
-        "FILE ANALYSIS"
-    );
-
-    console.log(
-        "Language:",
-        state.language
-    );
-
-    const response =
-        await fetch(
-            `${API_BASE}/api/analyze-file`,
-            {
-
-                method:
-                    "POST",
-
-                body:
-                    form,
-
-            }
-        );
-
-    if (!response.ok) {
-
-        throw new Error(
-            await readError(
-                response
-            )
-        );
-    }
-
-    return response.json();
-}
-
-
-/* ============================================================
-   RENDER RESULTS
-============================================================ */
-
-function renderResults(
-    data
-) {
-
-    if (!data) {
-        return;
-    }
-
-    const title =
-        data.title
-        ||
-        data.video_title
-        ||
-        "Meeting Analysis";
-
-    const transcriptText =
-        data.transcript
-        ||
-        data.transcription
-        ||
-        data.text
-        ||
-        "";
-
-    const summaryText =
-        data.summary
-        ||
-        data.summarization
-        ||
-        data.overview
-        ||
-        "";
-
-    const decisionsText =
-        data.key_decisions
-        ||
-        data.decisions
-        ||
-        "";
-
-    const outcomesText =
-        data.action_items
-        ||
-        data.outcomes
-        ||
-        "";
-
-    /* --------------------------------------------------------
-       SHOW RESULTS
-    -------------------------------------------------------- */
-
-    if (emptyState) {
-
-        emptyState.classList.add(
-            "hidden"
-        );
-    }
-
-    if (results) {
-
-        results.classList.remove(
-            "hidden"
-        );
-    }
-
-
-    /* --------------------------------------------------------
-       TITLE
-    -------------------------------------------------------- */
-
-    if (meetingTitle) {
-
-        meetingTitle.textContent =
-            title;
-    }
-
-
-    /* --------------------------------------------------------
-       TRANSCRIPT
-    -------------------------------------------------------- */
-
-    if (transcript) {
-
-        transcript.innerHTML =
-            formatText(
-                transcriptText
-            );
-    }
-
-
-    /* --------------------------------------------------------
-       SUMMARY
-    -------------------------------------------------------- */
-
-    if (summary) {
-
-        summary.innerHTML =
-            formatText(
-                summaryText
-            );
-    }
-
-
-    /* --------------------------------------------------------
-       DECISIONS
-    -------------------------------------------------------- */
-
-    if (decisions) {
-
-        decisions.innerHTML =
-            formatText(
-                decisionsText
-            );
-    }
-
-
-    /* --------------------------------------------------------
-       OUTCOMES
-    -------------------------------------------------------- */
-
-    if (outcomes) {
-
-        outcomes.innerHTML =
-            formatText(
-                outcomesText
-            );
-    }
-
-
-    /* --------------------------------------------------------
-       SESSION
-    -------------------------------------------------------- */
-
-    state.sessionId =
-        data.session_id
-        ||
-        data.sessionId
-        ||
-        data.id
-        ||
-        null;
-
-    if (sessionLabel) {
-
-        sessionLabel.textContent =
-            state.sessionId
-                ? `Session: ${state.sessionId}`
-                : "No active session";
-    }
-
-    state.history = [];
-
-    enableChat();
-}
-
-
-/* ============================================================
-   CHAT ENABLE
-============================================================ */
-
-function enableChat() {
-
-    const enabled =
-        Boolean(
-            state.sessionId
-        );
-
-    if (chatInput) {
-
-        chatInput.disabled =
-            !enabled;
-    }
-
-    if (sendBtn) {
-
-        sendBtn.disabled =
-            !enabled;
-    }
-}
-
-
-/* ============================================================
-   CHAT MESSAGE
-============================================================ */
-
-function addChatMessage(
-    role,
-    message
-) {
-
-    if (!chatMessages) {
-        return;
-    }
-
-    if (chatEmpty) {
-
-        chatEmpty.remove();
-    }
-
-    const wrapper =
-        document.createElement(
-            "div"
-        );
-
-    wrapper.className =
-        role === "user"
-            ? "message user-message"
-            : "message assistant-message";
-
-    wrapper.innerHTML = `
-        <div class="message-content">
-            ${formatText(message)}
-        </div>
-    `;
-
-    chatMessages.appendChild(
-        wrapper
-    );
-
-    chatMessages.scrollTop =
-        chatMessages.scrollHeight;
-}
-
-
-/* ============================================================
-   CHAT API
-============================================================ */
-
-async function askMeeting(
-    question
-) {
-
-    if (!state.sessionId) {
-
-        throw new Error(
-            "Please analyze the recording first."
-        );
-    }
-
-    const payload = {
-
-        session_id:
-            state.sessionId,
-
-        question:
-            question,
-
-        language:
-            state.language,
-
-        history:
-            state.history,
-
-    };
-
-    console.log(
-        "CHAT PAYLOAD:",
-        payload
-    );
-
-    const response =
-        await fetch(
-            `${API_BASE}/api/chat`,
-            {
-
-                method:
-                    "POST",
-
-                headers: {
-
-                    "Content-Type":
-                        "application/json",
-
-                    "Accept":
-                        "application/json",
-
-                },
-
-                body:
-                    JSON.stringify(
-                        payload
-                    ),
-
-            }
-        );
-
-    if (!response.ok) {
-
-        throw new Error(
-            await readError(
-                response
-            )
-        );
-    }
-
-    return response.json();
-}
-
-
-/* ============================================================
-   SEND CHAT
-============================================================ */
-
-async function sendChat() {
-
-    if (!chatInput) {
-        return;
-    }
-
-    const question =
-        chatInput.value.trim();
-
-    if (!question) {
-        return;
-    }
-
-    if (!state.sessionId) {
-
-        showError(
-            "Analyze a recording before asking questions."
-        );
-
-        return;
-    }
-
-    clearError();
-
-    chatInput.value =
-        "";
-
-    addChatMessage(
-        "user",
-        question
-    );
-
-    state.history.push({
-
-        role:
-            "user",
-
-        content:
-            question,
-
-    });
-
-    if (sendBtn) {
-
-        sendBtn.disabled =
-            true;
-    }
-
-    try {
-
-        const result =
-            await askMeeting(
-                question
-            );
-
-        const answer =
-            result.answer
-            ||
-            result.response
-            ||
-            result.message
-            ||
-            "I could not generate an answer.";
-
-        addChatMessage(
-            "assistant",
-            answer
-        );
-
-        state.history.push({
-
-            role:
-                "assistant",
-
-            content:
-                answer,
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "CHAT ERROR:",
-            error
-        );
-
-        addChatMessage(
-            "assistant",
-            error?.message
-            ||
-            "I couldn't answer that right now."
-        );
-
-    } finally {
-
-        enableChat();
-
-        chatInput.focus();
-    }
-}
-
-
-/* ============================================================
-   MAIN ANALYSIS
-============================================================ */
-
-async function analyze() {
-
-    if (state.analyzing) {
-        return;
-    }
-
-    clearError();
-
-    state.analyzing =
-        true;
-
-    state.analyzed =
-        false;
-
-    state.sessionId =
-        null;
-
-    state.history =
-        [];
-
-    if (analyzeBtn) {
-
-        analyzeBtn.disabled =
-            true;
-    }
-
-    if (analyzeText) {
-
-        analyzeText.textContent =
-            "ANALYZING...";
-    }
-
-    setStatus(
-        "processing",
-        "PROCESSING"
-    );
-
-    waveLoader?.classList.add(
-        "active"
-    );
-
-    try {
-
-        /* ----------------------------------------------------
-           STEP 1
-        ---------------------------------------------------- */
-
-        setPipeline(
-            1
-        );
-
-        let result;
-
-
-        /* ----------------------------------------------------
-           SOURCE
-        ---------------------------------------------------- */
-
-        if (
-            state.sourceType ===
-            "url"
-        ) {
-
-            console.log(
-                "SOURCE: YouTube URL"
-            );
-
-            result =
-                await analyzeURL();
-
-        } else {
-
-            console.log(
-                "SOURCE: Uploaded file"
-            );
-
-            result =
-                await analyzeFile();
-        }
-
-
-        /* ----------------------------------------------------
-           STEP 2
-        ---------------------------------------------------- */
-
-        setPipeline(
-            2
-        );
-
-
-        /* ----------------------------------------------------
-           STEP 3
-        ---------------------------------------------------- */
-
-        setPipeline(
-            3
-        );
-
-
-        /* ----------------------------------------------------
-           STEP 4
-        ---------------------------------------------------- */
-
-        setPipeline(
-            4
-        );
-
-
-        /* ----------------------------------------------------
-           STEP 5
-        ---------------------------------------------------- */
-
-        setPipeline(
-            5
-        );
-
-
-        /* ----------------------------------------------------
-           STEP 6
-        ---------------------------------------------------- */
-
-        setPipeline(
-            6
-        );
-
-
-        /* ----------------------------------------------------
-           RENDER
-        ---------------------------------------------------- */
-
-        renderResults(
-            result
-        );
-
-        finishPipeline();
-
-        state.analyzed =
-            true;
-
-        setStatus(
-            "ready",
-            "READY"
-        );
-
-        console.log(
-            "======================================"
-        );
-
-        console.log(
-            "ANALYSIS COMPLETE"
-        );
-
-        console.log(
-            "Session:",
-            state.sessionId
-        );
-
-        console.log(
-            "======================================"
-        );
-
-    } catch (error) {
-
-        console.error(
-            "ANALYZE ERROR:",
-            error
-        );
-
-        setPipeline(
-            2,
-            2
-        );
-
-        waveLoader?.classList.remove(
-            "active"
-        );
-
-        showError(
-            error?.message
-            ||
-            "Analysis failed."
-        );
-
-    } finally {
-
-        state.analyzing =
-            false;
-
-        if (analyzeBtn) {
-
-            analyzeBtn.disabled =
-                false;
-        }
-
-        if (analyzeText) {
-
-            analyzeText.textContent =
-                "ANALYZE";
-        }
-    }
-}
-
-
-/* ============================================================
-   BACKEND HEALTH CHECK
-============================================================ */
-
-async function checkBackend() {
-
-    try {
-
-        const response =
-            await fetch(
-                `${API_BASE}/api/health`
-            );
-
-        if (!response.ok) {
-
-            throw new Error(
-                "Backend unavailable"
-            );
-        }
-
-        console.log(
-            "✓ REELMIND backend connected"
-        );
-
-        setStatus(
-            null,
-            "IDLE"
-        );
-
-    } catch (error) {
-
-        console.warn(
-            "Backend health check failed:",
-            error
-        );
-
-        setStatus(
-            "error",
-            "OFFLINE"
-        );
-    }
-}
-
-
-/* ============================================================
-   EVENT LISTENERS
-============================================================ */
-
-function setupEvents() {
-
-    /* --------------------------------------------------------
+    /* ============================================================
        SOURCE TABS
-    -------------------------------------------------------- */
+    ============================================================ */
 
-    linkTab?.addEventListener(
-        "click",
-        () => {
+    tabs.forEach(
+        (button) => {
 
-            setSource(
-                "url"
+            button.addEventListener(
+                "click",
+                () => {
+
+                    tabs.forEach(
+                        (b) => {
+
+                            b.classList.remove(
+                                "active"
+                            );
+
+                            b.setAttribute(
+                                "aria-selected",
+                                "false"
+                            );
+                        }
+                    );
+
+                    button.classList.add(
+                        "active"
+                    );
+
+                    button.setAttribute(
+                        "aria-selected",
+                        "true"
+                    );
+
+                    state.sourceMode =
+                        button.dataset.tab;
+
+                    if (panelUrl) {
+
+                        panelUrl.hidden =
+                            state.sourceMode !==
+                            "url";
+                    }
+
+                    if (panelFile) {
+
+                        panelFile.hidden =
+                            state.sourceMode !==
+                            "file";
+                    }
+
+                    clearError();
+                }
             );
         }
     );
 
 
-    uploadTab?.addEventListener(
-        "click",
-        () => {
-
-            setSource(
-                "upload"
-            );
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       UPLOAD
-    -------------------------------------------------------- */
-
-    uploadBox?.addEventListener(
-        "click",
-        () => {
-
-            fileInput?.click();
-        }
-    );
-
+    /* ============================================================
+       FILE INPUT
+    ============================================================ */
 
     fileInput?.addEventListener(
         "change",
-        (event) => {
-
-            const file =
-                event.target
-                    ?.files?.[0];
-
-            setFile(
-                file
-            );
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       LANGUAGE
-    -------------------------------------------------------- */
-
-    englishBtn?.addEventListener(
-        "click",
         () => {
-
-            setLanguage(
-                "english"
-            );
-        }
-    );
-
-
-    hinglishBtn?.addEventListener(
-        "click",
-        () => {
-
-            setLanguage(
-                "hinglish"
-            );
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       ANALYZE
-    -------------------------------------------------------- */
-
-    analyzeBtn?.addEventListener(
-        "click",
-        () => {
-
-            analyze();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       CHAT
-    -------------------------------------------------------- */
-
-    chatForm?.addEventListener(
-        "submit",
-        (event) => {
-
-            event.preventDefault();
-
-            sendChat();
-        }
-    );
-
-
-    chatInput?.addEventListener(
-        "keydown",
-        (event) => {
 
             if (
-                event.key ===
-                "Enter"
+                fileInput.files &&
+                fileInput.files.length
             ) {
 
-                event.preventDefault();
-
-                sendChat();
+                setFile(
+                    fileInput.files[0]
+                );
             }
         }
     );
 
 
-    /* --------------------------------------------------------
-       DRAG & DROP
-    -------------------------------------------------------- */
+    /* ============================================================
+       FILE DROPZONE
+    ============================================================ */
 
-    uploadBox?.addEventListener(
-        "dragover",
-        (event) => {
+    ["dragover", "dragenter"].forEach(
+        (eventName) => {
 
-            event.preventDefault();
+            dropzone?.addEventListener(
+                eventName,
+                (event) => {
 
-            uploadBox.classList.add(
-                "dragging"
+                    event.preventDefault();
+
+                    dropzone.classList.add(
+                        "dragover"
+                    );
+                }
             );
         }
     );
 
 
-    uploadBox?.addEventListener(
-        "dragleave",
-        () => {
+    ["dragleave", "dragend"].forEach(
+        (eventName) => {
 
-            uploadBox.classList.remove(
-                "dragging"
+            dropzone?.addEventListener(
+                eventName,
+                () => {
+
+                    dropzone.classList.remove(
+                        "dragover"
+                    );
+                }
             );
         }
     );
 
 
-    uploadBox?.addEventListener(
+    dropzone?.addEventListener(
         "drop",
         (event) => {
 
             event.preventDefault();
 
-            uploadBox.classList.remove(
-                "dragging"
+            dropzone.classList.remove(
+                "dragover"
             );
 
             const file =
                 event.dataTransfer
                     ?.files?.[0];
 
-            setFile(
-                file
+            if (file) {
+                setFile(file);
+            }
+        }
+    );
+
+
+    /* ============================================================
+       FILE HANDLING
+    ============================================================ */
+
+    function setFile(file) {
+
+        if (!file) {
+            return;
+        }
+
+        const valid =
+            file.type.startsWith("audio/") ||
+            file.type.startsWith("video/");
+
+        if (!valid) {
+
+            showError(
+                "Please select a valid audio or video file."
+            );
+
+            return;
+        }
+
+        state.file =
+            file;
+
+        if (dropzoneText) {
+
+            dropzoneText.textContent =
+                file.name;
+        }
+
+        clearError();
+
+        console.log(
+            "Selected file:",
+            file.name
+        );
+    }
+
+
+    /* ============================================================
+       LANGUAGE
+    ============================================================ */
+
+    langBtns.forEach(
+        (button) => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    langBtns.forEach(
+                        (b) => {
+
+                            b.classList.remove(
+                                "active"
+                            );
+
+                            b.setAttribute(
+                                "aria-checked",
+                                "false"
+                            );
+                        }
+                    );
+
+                    button.classList.add(
+                        "active"
+                    );
+
+                    button.setAttribute(
+                        "aria-checked",
+                        "true"
+                    );
+
+                    state.language =
+                        button.dataset.lang ||
+                        "english";
+
+                    clearError();
+
+                    console.log(
+                        "Language:",
+                        state.language
+                    );
+                }
             );
         }
     );
-}
 
 
-/* ============================================================
-   INITIALIZATION
-============================================================ */
+    /* ============================================================
+       STATUS
+    ============================================================ */
 
-document.addEventListener(
-    "DOMContentLoaded",
-    () => {
+    function setStatus(
+        mode,
+        text
+    ) {
 
-        /* Default source */
-        setSource(
-            "url"
+        if (statusPill) {
+
+            statusPill.classList.remove(
+                "busy",
+                "ready",
+                "err",
+                "error"
+            );
+
+            if (mode) {
+
+                statusPill.classList.add(
+                    mode
+                );
+            }
+        }
+
+        if (statusText) {
+
+            statusText.textContent =
+                text;
+        }
+    }
+
+
+    /* ============================================================
+       ERROR
+    ============================================================ */
+
+    function showError(
+        message
+    ) {
+
+        console.error(
+            message
+        );
+
+        if (errorLine) {
+
+            errorLine.textContent =
+                message;
+
+            errorLine.hidden =
+                false;
+        }
+    }
+
+
+    function clearError() {
+
+        if (errorLine) {
+
+            errorLine.hidden =
+                true;
+
+            errorLine.textContent =
+                "";
+        }
+    }
+
+
+    /* ============================================================
+       PIPELINE
+    ============================================================ */
+
+    const STEP_DURATIONS = [
+        1200,
+        2200,
+        1600,
+        1600,
+        1600,
+        1200
+    ];
+
+
+    function resetSteps() {
+
+        if (!stepsList) {
+            return;
+        }
+
+        stepsList
+            .querySelectorAll(".step")
+            .forEach(
+                (step) => {
+
+                    step.classList.remove(
+                        "active",
+                        "done",
+                        "error"
+                    );
+                }
+            );
+    }
+
+
+    function runStepAnimation() {
+
+        if (!stepsList) {
+            return;
+        }
+
+        resetSteps();
+
+        waveform?.classList.add(
+            "live"
+        );
+
+        let current =
+            1;
+
+        const advance =
+            () => {
+
+                if (
+                    current >
+                    6
+                ) {
+                    return;
+                }
+
+                const previous =
+                    stepsList.querySelector(
+                        `.step[data-step="${current - 1}"]`
+                    );
+
+                if (previous) {
+
+                    previous.classList.remove(
+                        "active"
+                    );
+
+                    previous.classList.add(
+                        "done"
+                    );
+                }
+
+                const step =
+                    stepsList.querySelector(
+                        `.step[data-step="${current}"]`
+                    );
+
+                if (step) {
+
+                    step.classList.add(
+                        "active"
+                    );
+                }
+
+                state.stepTimer =
+                    setTimeout(
+                        () => {
+
+                            current +=
+                                1;
+
+                            advance();
+                        },
+                        STEP_DURATIONS[
+                            current - 1
+                        ] || 1200
+                    );
+            };
+
+        advance();
+    }
+
+
+    function finishStepAnimation(
+        success
+    ) {
+
+        clearTimeout(
+            state.stepTimer
+        );
+
+        waveform?.classList.remove(
+            "live"
+        );
+
+        if (!stepsList) {
+            return;
+        }
+
+        stepsList
+            .querySelectorAll(".step")
+            .forEach(
+                (step) => {
+
+                    step.classList.remove(
+                        "active",
+                        "error"
+                    );
+
+                    if (success) {
+
+                        step.classList.add(
+                            "done"
+                        );
+                    }
+                }
+            );
+    }
+
+
+    /* ============================================================
+       ANALYZE
+    ============================================================ */
+
+    runBtn?.addEventListener(
+        "click",
+        async () => {
+
+            if (state.busy) {
+                return;
+            }
+
+            clearError();
+
+            let endpoint;
+            let options;
+
+            /* -----------------------------------------------
+               YOUTUBE / URL
+            ----------------------------------------------- */
+
+            if (
+                state.sourceMode ===
+                "url"
+            ) {
+
+                const source =
+                    sourceUrlInput
+                        ?.value
+                        ?.trim();
+
+                if (!source) {
+
+                    showError(
+                        "Enter a YouTube URL."
+                    );
+
+                    return;
+                }
+
+                if (
+                    !source.startsWith(
+                        "http://"
+                    ) &&
+                    !source.startsWith(
+                        "https://"
+                    )
+                ) {
+
+                    showError(
+                        "Please enter a valid URL starting with http:// or https://."
+                    );
+
+                    return;
+                }
+
+                endpoint =
+                    "/api/analyze";
+
+                options = {
+
+                    method:
+                        "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        "Accept":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+
+                            source:
+                                source,
+
+                            language:
+                                state.language
+                        })
+                };
+            }
+
+            /* -----------------------------------------------
+               FILE
+            ----------------------------------------------- */
+
+            else {
+
+                if (!state.file) {
+
+                    showError(
+                        "Choose an audio or video file."
+                    );
+
+                    return;
+                }
+
+                endpoint =
+                    "/api/analyze-file";
+
+                const form =
+                    new FormData();
+
+                form.append(
+                    "file",
+                    state.file
+                );
+
+                form.append(
+                    "language",
+                    state.language
+                );
+
+                options = {
+
+                    method:
+                        "POST",
+
+                    body:
+                        form
+                };
+            }
+
+
+            /* -----------------------------------------------
+               START
+            ----------------------------------------------- */
+
+            state.busy =
+                true;
+
+            runBtn.disabled =
+                true;
+
+            runBtn.querySelector(
+                ".run-btn-label"
+            ).textContent =
+                "analyzing…";
+
+            setStatus(
+                "busy",
+                "processing"
+            );
+
+            runStepAnimation();
+
+
+            try {
+
+                console.log(
+                    "REELMIND REQUEST:",
+                    API_BASE + endpoint
+                );
+
+
+                const response =
+                    await fetch(
+                        API_BASE +
+                        endpoint,
+                        options
+                    );
+
+
+                const data =
+                    await response
+                        .json()
+                        .catch(
+                            () => null
+                        );
+
+
+                if (!response.ok) {
+
+                    const detail =
+                        data?.detail ||
+                        `Request failed (${response.status}).`;
+
+                    throw new Error(
+                        detail
+                    );
+                }
+
+
+                console.log(
+                    "REELMIND RESPONSE:",
+                    data
+                );
+
+
+                finishStepAnimation(
+                    true
+                );
+
+
+                renderResults(
+                    data
+                );
+
+
+                state.sessionId =
+                    data.session_id ||
+                    null;
+
+
+                setStatus(
+                    "ready",
+                    "ready"
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    "ANALYZE ERROR:",
+                    error
+                );
+
+                finishStepAnimation(
+                    false
+                );
+
+                setStatus(
+                    "error",
+                    "error"
+                );
+
+                showError(
+                    error?.message ||
+                    "Unable to analyze the recording."
+                );
+
+
+            } finally {
+
+                state.busy =
+                    false;
+
+                runBtn.disabled =
+                    false;
+
+                runBtn.querySelector(
+                    ".run-btn-label"
+                ).textContent =
+                    "analyze";
+            }
+        }
+    );
+
+
+    /* ============================================================
+       RESULTS
+    ============================================================ */
+
+    function renderResults(
+        data
+    ) {
+
+        if (emptyState) {
+
+            emptyState.hidden =
+                true;
+        }
+
+        if (results) {
+
+            results.hidden =
+                false;
+        }
+
+        if (resultTitle) {
+
+            resultTitle.textContent =
+                data.title ||
+                "Untitled meeting";
+        }
+
+        if (outSummary) {
+
+            outSummary.textContent =
+                data.summary ||
+                "No summary returned.";
+        }
+
+        if (outTranscript) {
+
+            outTranscript.textContent =
+                data.transcript ||
+                "";
+        }
+
+        fillList(
+            outActions,
+            data.action_items,
+            "No action items found."
+        );
+
+        fillList(
+            outDecisions,
+            data.key_decisions,
+            "No key decisions found."
+        );
+
+        fillList(
+            outQuestions,
+            data.open_questions,
+            "No open questions found."
         );
 
 
-        /* Default language */
-        setLanguage(
-            "english"
-        );
+        state.sessionId =
+            data.session_id ||
+            null;
 
 
-        /* Chat disabled until analysis */
-        enableChat();
+        if (state.sessionId) {
+
+            if (chatDock) {
+
+                chatDock.hidden =
+                    false;
+            }
+
+            if (chatSession) {
+
+                chatSession.textContent =
+                    "session · " +
+                    state.sessionId
+                        .slice(0, 8);
+            }
+
+            if (chatInput) {
+
+                chatInput.disabled =
+                    false;
+            }
+
+            if (chatSend) {
+
+                chatSend.disabled =
+                    false;
+            }
+        }
 
 
-        /* Events */
-        setupEvents();
+        /* Result tabs */
 
+        resultTabs.forEach(
+            (tab) => {
 
-        /* Backend */
-        checkBackend();
+                tab.addEventListener(
+                    "click",
+                    () => {
 
+                        resultTabs.forEach(
+                            (t) =>
+                                t.classList.remove(
+                                    "active"
+                                )
+                        );
 
-        console.log(
-            "======================================"
-        );
-
-        console.log(
-            "REELMIND FRONTEND READY"
-        );
-
-        console.log(
-            "======================================"
-        );
-
-        console.log(
-            "STT ROUTING:"
-        );
-
-        console.log(
-            "English  -> Hugging Face Whisper API"
-        );
-
-        console.log(
-            "Hinglish -> Sarvam Saaras v3 / codemix"
-        );
-
-        console.log(
-            "API:",
-            API_BASE
-        );
-
-        console.log(
-            "======================================"
+                        tab.classList.add(
+                            "active"
+                        );
+                    }
+                );
+            }
         );
     }
-);
+
+
+    function fillList(
+        container,
+        value,
+        emptyMessage
+    ) {
+
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML =
+            "";
+
+        let items =
+            [];
+
+        if (
+            Array.isArray(
+                value
+            )
+        ) {
+
+            items =
+                value
+                    .map(
+                        String
+                    )
+                    .map(
+                        (item) =>
+                            item.trim()
+                    )
+                    .filter(
+                        Boolean
+                    );
+
+        } else if (
+            typeof value ===
+            "string"
+        ) {
+
+            items =
+                value
+                    .split(
+                        /\r?\n/
+                    )
+                    .map(
+                        (item) =>
+                            item
+                                .replace(
+                                    /^[\s\-•*]+/,
+                                    ""
+                                )
+                                .trim()
+                    )
+                    .filter(
+                        Boolean
+                    );
+        }
+
+
+        if (!items.length) {
+
+            const li =
+                document.createElement(
+                    "li"
+                );
+
+            li.textContent =
+                emptyMessage;
+
+            container.appendChild(
+                li
+            );
+
+            return;
+        }
+
+
+        items.forEach(
+            (item) => {
+
+                const li =
+                    document.createElement(
+                        "li"
+                    );
+
+                li.textContent =
+                    item;
+
+                container.appendChild(
+                    li
+                );
+            }
+        );
+    }
+
+
+    /* ============================================================
+       CHAT
+    ============================================================ */
+
+    chatForm?.addEventListener(
+        "submit",
+        async (event) => {
+
+            event.preventDefault();
+
+            await sendChat();
+        }
+    );
+
+
+    chatInput?.addEventListener(
+        "keydown",
+        async (event) => {
+
+            if (
+                event.key ===
+                "Enter" &&
+                !event.shiftKey
+            ) {
+
+                event.preventDefault();
+
+                await sendChat();
+            }
+        }
+    );
+
+
+    chatSend?.addEventListener(
+        "click",
+        async () => {
+
+            await sendChat();
+        }
+    );
+
+
+    async function sendChat() {
+
+        if (!chatInput) {
+            return;
+        }
+
+        const question =
+            chatInput.value.trim();
+
+        if (!question) {
+            return;
+        }
+
+        if (!state.sessionId) {
+
+            showError(
+                "Analyze a recording before asking questions."
+            );
+
+            return;
+        }
+
+        chatInput.value =
+            "";
+
+        addChatMessage(
+            "user",
+            question
+        );
+
+        chatSend &&
+            (chatSend.disabled =
+                true);
+
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_BASE}/api/chat`,
+                    {
+
+                        method:
+                            "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                            "Accept":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify({
+
+                                session_id:
+                                    state.sessionId,
+
+                                question:
+                                    question,
+
+                                language:
+                                    state.language,
+
+                                history:
+                                    []
+                            })
+                    }
+                );
+
+
+            const data =
+                await response
+                    .json()
+                    .catch(
+                        () => null
+                    );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    data?.detail ||
+                    `Chat failed (${response.status}).`
+                );
+            }
+
+
+            addChatMessage(
+                "assistant",
+                data?.answer ||
+                data?.response ||
+                data?.message ||
+                "I could not generate an answer."
+            );
+
+
+        } catch (error) {
+
+            console.error(
+                "CHAT ERROR:",
+                error
+            );
+
+            addChatMessage(
+                "assistant",
+                "I couldn't answer that right now. Please try again."
+            );
+
+        } finally {
+
+            if (chatSend) {
+
+                chatSend.disabled =
+                    false;
+            }
+
+            chatInput.focus();
+        }
+    }
+
+
+    function addChatMessage(
+        role,
+        message
+    ) {
+
+        if (!chatLog) {
+            return;
+        }
+
+        const div =
+            document.createElement(
+                "div"
+            );
+
+        div.className =
+            role === "user"
+                ? "chat-message user-message"
+                : "chat-message assistant-message";
+
+        div.textContent =
+            message;
+
+        chatLog.appendChild(
+            div
+        );
+
+        chatLog.scrollTop =
+            chatLog.scrollHeight;
+    }
+
+
+    /* ============================================================
+       BACKEND HEALTH CHECK
+    ============================================================ */
+
+    async function checkBackend() {
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_BASE}/api/health`
+                );
+
+            if (!response.ok) {
+                throw new Error(
+                    "Backend unavailable"
+                );
+            }
+
+            console.log(
+                "✓ REELMIND backend connected"
+            );
+
+            setStatus(
+                null,
+                "idle"
+            );
+
+        } catch (error) {
+
+            console.warn(
+                "Backend health check failed:",
+                error
+            );
+
+            /*
+             * Do not block the UI.
+             * Render free instances can sleep.
+             */
+            setStatus(
+                null,
+                "idle"
+            );
+        }
+    }
+
+
+    /* ============================================================
+       INITIALIZATION
+    ============================================================ */
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+
+            console.log(
+                "================================"
+            );
+
+            console.log(
+                "REELMIND FRONTEND READY"
+            );
+
+            console.log(
+                "API:",
+                API_BASE
+            );
+
+            console.log(
+                "================================"
+            );
+
+
+            /* Default source */
+
+            if (panelUrl) {
+                panelUrl.hidden =
+                    false;
+            }
+
+            if (panelFile) {
+                panelFile.hidden =
+                    true;
+            }
+
+
+            /* Default language */
+
+            langBtns.forEach(
+                (button) => {
+
+                    if (
+                        button.dataset.lang ===
+                        "english"
+                    ) {
+
+                        button.classList.add(
+                            "active"
+                        );
+
+                        button.setAttribute(
+                            "aria-checked",
+                            "true"
+                        );
+                    }
+                }
+            );
+
+
+            /* Chat disabled */
+
+            if (chatInput) {
+                chatInput.disabled =
+                    true;
+            }
+
+            if (chatSend) {
+                chatSend.disabled =
+                    true;
+            }
+
+
+            /* Backend */
+
+            checkBackend();
+        }
+    );
+
+})();
