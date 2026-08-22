@@ -1,0 +1,86 @@
+# =========================
+# ENV / SECRETS
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+
+.venv/
+venv/
+env/
+
+.pytest_cache/
+.mypy_cache/
+
+# =========================
+# Whisper / ML / Models
+# =========================
+*.pt
+*.pth
+*.bin
+*.safetensors
+models/
+model/
+cache/
+
+# =========================
+# Downloads / generated media
+# =========================
+downloads/
+*.wav
+*.mp3
+*.mp4
+*.webm
+*.m4a
+*.avi
+*.mov
+
+# =========================
+# Node
+# =========================
+node_modules/
+frontend/node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# =========================
+# Build
+# =========================
+dist/
+build/
+.vite/
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+*.log
+uploads/
+vector_db/
+.env
+downloads/
+uploads/
+vector_db/
+__pycache__/
+*.pyc
+*.log

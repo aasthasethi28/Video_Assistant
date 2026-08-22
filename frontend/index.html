@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>REELMIND — Meeting Intelligence</title>
+
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- HEADER -->
+    <header class="topbar">
+
+        <div class="brand">
+            <div class="brand-mark">◇</div>
+
+            <div>
+                <div class="brand-name">REELMIND</div>
+                <div class="brand-subtitle">meeting intelligence</div>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div id="statusBadge" class="status-badge idle">
+                <span class="status-dot"></span>
+                <span id="statusText">IDLE</span>
+            </div>
+
+            <button
+                type="button"
+                id="settingsBtn"
+                class="icon-button"
+                title="Settings"
+            >
+                ⚙
+            </button>
+        </div>
+
+    </header>
+
+
+    <!-- MAIN -->
+    <main class="main-layout">
+
+        <!-- LEFT PANEL -->
+        <aside class="control-panel">
+
+            <!-- SOURCE -->
+            <section class="section">
+
+                <div class="section-label">SOURCE</div>
+
+                <div class="source-tabs">
+
+                    <button
+                        type="button"
+                        id="linkTab"
+                        class="source-tab active"
+                    >
+                        link
+                    </button>
+
+                    <button
+                        type="button"
+                        id="uploadTab"
+                        class="source-tab"
+                    >
+                        upload
+                    </button>
+
+                </div>
+
+
+                <!-- LINK INPUT -->
+                <div id="linkSource" class="source-content">
+
+                    <input
+                        type="url"
+                        id="urlInput"
+                        class="text-input"
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        autocomplete="off"
+                    >
+
+                </div>
+
+
+                <!-- UPLOAD -->
+                <div
+                    id="uploadSource"
+                    class="source-content hidden"
+                >
+
+                    <input
+                        type="file"
+                        id="fileInput"
+                        accept="audio/*,video/*"
+                        hidden
+                    >
+
+                    <button
+                        type="button"
+                        id="uploadBox"
+                        class="upload-box"
+                    >
+                        <span class="upload-icon">↑</span>
+                        <span>Drop audio/video here or click to upload</span>
+                    </button>
+
+                    <div
+                        id="selectedFile"
+                        class="selected-file hidden"
+                    ></div>
+
+                </div>
+
+            </section>
+
+
+            <!-- LANGUAGE -->
+            <section class="section">
+
+                <div class="section-label">LANGUAGE</div>
+
+                <div class="language-buttons">
+
+                    <button
+                        type="button"
+                        id="englishBtn"
+                        class="language-btn active"
+                        data-language="en"
+                    >
+                        English
+                    </button>
+
+                    <button
+                        type="button"
+                        id="hinglishBtn"
+                        class="language-btn"
+                        data-language="hi"
+                    >
+                        Hinglish
+                    </button>
+
+                </div>
+
+            </section>
+
+
+            <!-- ANALYZE -->
+            <button
+                type="button"
+                id="analyzeBtn"
+                class="analyze-button"
+            >
+                <span id="analyzeText">ANALYZE</span>
+                <span class="arrow">▶</span>
+            </button>
+
+
+            <!-- ERROR -->
+            <div
+                id="errorBox"
+                class="error-box hidden"
+            ></div>
+
+
+            <!-- PIPELINE -->
+            <section class="pipeline-section">
+
+                <div class="section-label">PIPELINE</div>
+
+                <div class="pipeline">
+
+                    <div
+                        class="pipeline-step"
+                        data-step="1"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">01</span>
+                        <span>Processing input</span>
+                    </div>
+
+                    <div
+                        class="pipeline-step"
+                        data-step="2"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">02</span>
+                        <span>Transcribing audio</span>
+                    </div>
+
+                    <div
+                        class="pipeline-step"
+                        data-step="3"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">03</span>
+                        <span>Title &amp; summary</span>
+                    </div>
+
+                    <div
+                        class="pipeline-step"
+                        data-step="4"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">04</span>
+                        <span>Extracting decisions</span>
+                    </div>
+
+                    <div
+                        class="pipeline-step"
+                        data-step="5"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">05</span>
+                        <span>Building RAG index</span>
+                    </div>
+
+                    <div
+                        class="pipeline-step"
+                        data-step="6"
+                    >
+                        <span class="pipeline-dot"></span>
+                        <span class="pipeline-number">06</span>
+                        <span>Ready</span>
+                    </div>
+
+                </div>
+
+                <div class="wave-loader">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+            </section>
+
+        </aside>
+
+
+        <!-- RIGHT PANEL -->
+        <section class="content-area">
+
+            <!-- RESULT -->
+            <div
+                id="resultPanel"
+                class="result-panel"
+            >
+
+                <div
+                    id="emptyState"
+                    class="empty-state"
+                >
+                    <div class="empty-icon">◇</div>
+
+                    <h2>Feed the console a recording.</h2>
+
+                    <p>
+                        Transcript, summary and a chat-ready index
+                        will land here.
+                    </p>
+                </div>
+
+
+                <!-- RESULTS ARE INSERTED HERE -->
+                <div
+                    id="results"
+                    class="results hidden"
+                >
+
+                    <div class="result-header">
+
+                        <div>
+                            <div class="result-label">
+                                MEETING ANALYSIS
+                            </div>
+
+                            <h1 id="meetingTitle">
+                                Meeting
+                            </h1>
+                        </div>
+
+                    </div>
+
+
+                    <div class="result-grid">
+
+                        <div class="result-card transcript-card">
+
+                            <div class="card-title">
+                                TRANSCRIPT
+                            </div>
+
+                            <div
+                                id="transcript"
+                                class="result-text"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="result-card summary-card">
+
+                            <div class="card-title">
+                                SUMMARY
+                            </div>
+
+                            <div
+                                id="summary"
+                                class="result-text markdown-content"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="result-card">
+
+                            <div class="card-title">
+                                DECISIONS
+                            </div>
+
+                            <div
+                                id="decisions"
+                                class="result-text markdown-content"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="result-card">
+
+                            <div class="card-title">
+                                OUTCOMES
+                            </div>
+
+                            <div
+                                id="outcomes"
+                                class="result-text markdown-content"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- CHAT -->
+            <section class="chat-panel">
+
+                <div class="chat-header">
+
+                    <div>
+                        <div class="chat-title">
+                            Ask the meeting
+                        </div>
+
+                        <div
+                            id="sessionLabel"
+                            class="session-label"
+                        >
+                            No active session
+                        </div>
+                    </div>
+
+                </div>
+
+
+                <div
+                    id="chatMessages"
+                    class="chat-messages"
+                >
+
+                    <div
+                        id="chatEmpty"
+                        class="chat-empty"
+                    >
+                        Ask something about the meeting after analysis.
+                    </div>
+
+                </div>
+
+
+                <form
+                    id="chatForm"
+                    class="chat-form"
+                >
+
+                    <input
+                        type="text"
+                        id="chatInput"
+                        class="chat-input"
+                        placeholder="Ask something about the meeting..."
+                        autocomplete="off"
+                        disabled
+                    >
+
+                    <button
+                        type="submit"
+                        id="sendBtn"
+                        class="send-button"
+                        disabled
+                    >
+                        send
+                    </button>
+
+                </form>
+
+            </section>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<script src="/app.js"></script>
+
+</body>
+</html>
