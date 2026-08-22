@@ -3,12 +3,10 @@
    ============================================================
    STT ROUTING:
    English  -> Hugging Face Whisper API
-   Hinglish -> Sarvam Saaras v3 (codemix)
+   Hinglish -> Sarvam Saaras v3 / codemix
 
-   IMPORTANT:
-   API keys are NEVER stored in this file.
-   They stay inside backend .env.
-============================================================ */
+   API keys are NEVER stored here.
+   ============================================================ */
 
 "use strict";
 
@@ -28,18 +26,27 @@ const API_BASE = (
 ============================================================ */
 
 const state = {
+
     sourceType: "url",
+
     language: "english",
+
     file: null,
+
     sessionId: null,
+
+    transcript: "",
+
     analyzing: false,
+
     analyzed: false,
+
     history: [],
 };
 
 
 /* ============================================================
-   DOM ELEMENTS
+   DOM
 ============================================================ */
 
 const $ = (id) =>
@@ -142,7 +149,7 @@ const waveLoader =
 
 
 /* ============================================================
-   HTML / TEXT HELPERS
+   HTML HELPERS
 ============================================================ */
 
 function escapeHTML(value) {
@@ -150,26 +157,11 @@ function escapeHTML(value) {
     return String(
         value ?? ""
     )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }
 
 
@@ -441,7 +433,7 @@ function finishPipeline() {
 
 
 /* ============================================================
-   SOURCE SWITCHING
+   SOURCE
 ============================================================ */
 
 function setSource(
@@ -521,18 +513,11 @@ function setLanguage(
         state.language
     );
 
-    /*
-       ENGINE ROUTING:
 
-       English
-       -> Hugging Face Whisper API
-
-       Hinglish
-       -> Sarvam Saaras v3
-          mode = codemix
-    */
-
-    if (language === "english") {
+    if (
+        language ===
+        "english"
+    ) {
 
         console.log(
             "STT ENGINE: Hugging Face Whisper API"
@@ -548,7 +533,7 @@ function setLanguage(
 
 
 /* ============================================================
-   FILE HANDLING
+   FILE
 ============================================================ */
 
 function setFile(
@@ -600,7 +585,7 @@ function setFile(
 
 
 /* ============================================================
-   API: ANALYZE YOUTUBE URL
+   API - YOUTUBE
 ============================================================ */
 
 async function analyzeURL() {
@@ -645,6 +630,7 @@ async function analyzeURL() {
         payload
     );
 
+
     const response =
         await fetch(
             `${API_BASE}/api/analyze`,
@@ -671,6 +657,7 @@ async function analyzeURL() {
             }
         );
 
+
     if (!response.ok) {
 
         throw new Error(
@@ -680,12 +667,13 @@ async function analyzeURL() {
         );
     }
 
+
     return response.json();
 }
 
 
 /* ============================================================
-   API: ANALYZE UPLOADED FILE
+   API - FILE
 ============================================================ */
 
 async function analyzeFile() {
@@ -697,18 +685,22 @@ async function analyzeFile() {
         );
     }
 
+
     const form =
         new FormData();
+
 
     form.append(
         "file",
         state.file
     );
 
+
     form.append(
         "language",
         state.language
     );
+
 
     console.log(
         "FILE ANALYSIS"
@@ -718,6 +710,7 @@ async function analyzeFile() {
         "Language:",
         state.language
     );
+
 
     const response =
         await fetch(
@@ -733,6 +726,7 @@ async function analyzeFile() {
             }
         );
 
+
     if (!response.ok) {
 
         throw new Error(
@@ -741,6 +735,7 @@ async function analyzeFile() {
             )
         );
     }
+
 
     return response.json();
 }
@@ -758,12 +753,14 @@ function renderResults(
         return;
     }
 
+
     const title =
         data.title
         ||
         data.video_title
         ||
         "Meeting Analysis";
+
 
     const transcriptText =
         data.transcript
@@ -774,6 +771,7 @@ function renderResults(
         ||
         "";
 
+
     const summaryText =
         data.summary
         ||
@@ -783,12 +781,14 @@ function renderResults(
         ||
         "";
 
+
     const decisionsText =
         data.key_decisions
         ||
         data.decisions
         ||
         "";
+
 
     const outcomesText =
         data.action_items
@@ -797,23 +797,29 @@ function renderResults(
         ||
         "";
 
+
+    /* --------------------------------------------------------
+       IMPORTANT:
+       SAVE TRANSCRIPT FOR CHAT SESSION RECOVERY
+    -------------------------------------------------------- */
+
+    state.transcript =
+        String(
+            transcriptText
+        );
+
+
     /* --------------------------------------------------------
        SHOW RESULTS
     -------------------------------------------------------- */
 
-    if (emptyState) {
+    emptyState?.classList.add(
+        "hidden"
+    );
 
-        emptyState.classList.add(
-            "hidden"
-        );
-    }
-
-    if (results) {
-
-        results.classList.remove(
-            "hidden"
-        );
-    }
+    results?.classList.remove(
+        "hidden"
+    );
 
 
     /* --------------------------------------------------------
@@ -892,6 +898,7 @@ function renderResults(
         ||
         null;
 
+
     if (sessionLabel) {
 
         sessionLabel.textContent =
@@ -900,9 +907,18 @@ function renderResults(
                 : "No active session";
     }
 
+
     state.history = [];
 
+
     enableChat();
+
+
+    console.log(
+        "Transcript saved for chat recovery:",
+        state.transcript.length,
+        "characters"
+    );
 }
 
 
@@ -917,11 +933,13 @@ function enableChat() {
             state.sessionId
         );
 
+
     if (chatInput) {
 
         chatInput.disabled =
             !enabled;
     }
+
 
     if (sendBtn) {
 
@@ -944,20 +962,21 @@ function addChatMessage(
         return;
     }
 
-    if (chatEmpty) {
 
-        chatEmpty.remove();
-    }
+    chatEmpty?.remove();
+
 
     const wrapper =
         document.createElement(
             "div"
         );
 
+
     wrapper.className =
         role === "user"
             ? "message user-message"
             : "message assistant-message";
+
 
     wrapper.innerHTML = `
         <div class="message-content">
@@ -965,9 +984,11 @@ function addChatMessage(
         </div>
     `;
 
+
     chatMessages.appendChild(
         wrapper
     );
+
 
     chatMessages.scrollTop =
         chatMessages.scrollHeight;
@@ -989,6 +1010,18 @@ async function askMeeting(
         );
     }
 
+
+    /*
+       IMPORTANT:
+
+       transcript is now included.
+
+       If Render restarts the backend and
+       the in-memory session disappears,
+       main.py can rebuild the RAG session
+       using this transcript.
+    */
+
     const payload = {
 
         session_id:
@@ -1003,12 +1036,29 @@ async function askMeeting(
         history:
             state.history,
 
+        transcript:
+            state.transcript,
+
     };
+
 
     console.log(
         "CHAT PAYLOAD:",
         payload
     );
+
+
+    console.log(
+        "CHAT SESSION:",
+        state.sessionId
+    );
+
+
+    console.log(
+        "CHAT TRANSCRIPT LENGTH:",
+        state.transcript.length
+    );
+
 
     const response =
         await fetch(
@@ -1036,6 +1086,7 @@ async function askMeeting(
             }
         );
 
+
     if (!response.ok) {
 
         throw new Error(
@@ -1044,6 +1095,7 @@ async function askMeeting(
             )
         );
     }
+
 
     return response.json();
 }
@@ -1059,12 +1111,15 @@ async function sendChat() {
         return;
     }
 
+
     const question =
         chatInput.value.trim();
+
 
     if (!question) {
         return;
     }
+
 
     if (!state.sessionId) {
 
@@ -1075,15 +1130,19 @@ async function sendChat() {
         return;
     }
 
+
     clearError();
+
 
     chatInput.value =
         "";
+
 
     addChatMessage(
         "user",
         question
     );
+
 
     state.history.push({
 
@@ -1095,11 +1154,13 @@ async function sendChat() {
 
     });
 
+
     if (sendBtn) {
 
         sendBtn.disabled =
             true;
     }
+
 
     try {
 
@@ -1107,6 +1168,7 @@ async function sendChat() {
             await askMeeting(
                 question
             );
+
 
         const answer =
             result.answer
@@ -1117,10 +1179,12 @@ async function sendChat() {
             ||
             "I could not generate an answer.";
 
+
         addChatMessage(
             "assistant",
             answer
         );
+
 
         state.history.push({
 
@@ -1132,6 +1196,7 @@ async function sendChat() {
 
         });
 
+
     } catch (error) {
 
         console.error(
@@ -1139,12 +1204,34 @@ async function sendChat() {
             error
         );
 
+
         addChatMessage(
             "assistant",
             error?.message
             ||
             "I couldn't answer that right now."
         );
+
+
+        /*
+           If backend reports an expired session,
+           keep the transcript in state so the
+           next attempt can rebuild it.
+        */
+
+        if (
+            error?.message
+                ?.toLowerCase()
+                .includes(
+                    "session"
+                )
+        ) {
+
+            console.warn(
+                "Chat session may have expired. Transcript is retained for recovery."
+            );
+        }
+
 
     } finally {
 
@@ -1165,19 +1252,29 @@ async function analyze() {
         return;
     }
 
+
     clearError();
+
 
     state.analyzing =
         true;
 
+
     state.analyzed =
         false;
+
 
     state.sessionId =
         null;
 
+
+    state.transcript =
+        "";
+
+
     state.history =
         [];
+
 
     if (analyzeBtn) {
 
@@ -1185,20 +1282,24 @@ async function analyze() {
             true;
     }
 
+
     if (analyzeText) {
 
         analyzeText.textContent =
             "ANALYZING...";
     }
 
+
     setStatus(
         "processing",
         "PROCESSING"
     );
 
+
     waveLoader?.classList.add(
         "active"
     );
+
 
     try {
 
@@ -1209,6 +1310,7 @@ async function analyze() {
         setPipeline(
             1
         );
+
 
         let result;
 
@@ -1226,8 +1328,10 @@ async function analyze() {
                 "SOURCE: YouTube URL"
             );
 
+
             result =
                 await analyzeURL();
+
 
         } else {
 
@@ -1235,8 +1339,28 @@ async function analyze() {
                 "SOURCE: Uploaded file"
             );
 
+
             result =
                 await analyzeFile();
+        }
+
+
+        /* ----------------------------------------------------
+           CHECK BACKEND RESULT
+        ---------------------------------------------------- */
+
+        if (
+            result &&
+            result.success === false
+        ) {
+
+            throw new Error(
+                result.error_message
+                ||
+                result.message
+                ||
+                "Backend analysis failed."
+            );
         }
 
 
@@ -1293,32 +1417,47 @@ async function analyze() {
             result
         );
 
+
         finishPipeline();
+
 
         state.analyzed =
             true;
+
 
         setStatus(
             "ready",
             "READY"
         );
 
+
         console.log(
             "======================================"
         );
 
+
         console.log(
             "ANALYSIS COMPLETE"
         );
+
 
         console.log(
             "Session:",
             state.sessionId
         );
 
+
+        console.log(
+            "Transcript:",
+            state.transcript.length,
+            "characters"
+        );
+
+
         console.log(
             "======================================"
         );
+
 
     } catch (error) {
 
@@ -1327,14 +1466,17 @@ async function analyze() {
             error
         );
 
+
         setPipeline(
             2,
             2
         );
 
+
         waveLoader?.classList.remove(
             "active"
         );
+
 
         showError(
             error?.message
@@ -1342,16 +1484,19 @@ async function analyze() {
             "Analysis failed."
         );
 
+
     } finally {
 
         state.analyzing =
             false;
+
 
         if (analyzeBtn) {
 
             analyzeBtn.disabled =
                 false;
         }
+
 
         if (analyzeText) {
 
@@ -1363,7 +1508,7 @@ async function analyze() {
 
 
 /* ============================================================
-   BACKEND HEALTH CHECK
+   BACKEND HEALTH
 ============================================================ */
 
 async function checkBackend() {
@@ -1375,6 +1520,7 @@ async function checkBackend() {
                 `${API_BASE}/api/health`
             );
 
+
         if (!response.ok) {
 
             throw new Error(
@@ -1382,14 +1528,22 @@ async function checkBackend() {
             );
         }
 
+
+        const data =
+            await response.json();
+
+
         console.log(
-            "✓ REELMIND backend connected"
+            "✓ REELMIND backend connected",
+            data
         );
+
 
         setStatus(
             null,
             "IDLE"
         );
+
 
     } catch (error) {
 
@@ -1397,6 +1551,7 @@ async function checkBackend() {
             "Backend health check failed:",
             error
         );
+
 
         setStatus(
             "error",
@@ -1459,6 +1614,7 @@ function setupEvents() {
                 event.target
                     ?.files?.[0];
 
+
             setFile(
                 file
             );
@@ -1506,7 +1662,7 @@ function setupEvents() {
 
 
     /* --------------------------------------------------------
-       CHAT
+       CHAT FORM
     -------------------------------------------------------- */
 
     chatForm?.addEventListener(
@@ -1519,6 +1675,10 @@ function setupEvents() {
         }
     );
 
+
+    /* --------------------------------------------------------
+       ENTER TO SEND
+    -------------------------------------------------------- */
 
     chatInput?.addEventListener(
         "keydown",
@@ -1575,9 +1735,11 @@ function setupEvents() {
                 "dragging"
             );
 
+
             const file =
                 event.dataTransfer
                     ?.files?.[0];
+
 
             setFile(
                 file
@@ -1595,58 +1757,84 @@ document.addEventListener(
     "DOMContentLoaded",
     () => {
 
-        /* Default source */
+        /* ----------------------------------------------------
+           DEFAULT SOURCE
+        ---------------------------------------------------- */
+
         setSource(
             "url"
         );
 
 
-        /* Default language */
+        /* ----------------------------------------------------
+           DEFAULT LANGUAGE
+        ---------------------------------------------------- */
+
         setLanguage(
             "english"
         );
 
 
-        /* Chat disabled until analysis */
+        /* ----------------------------------------------------
+           CHAT DISABLED UNTIL ANALYSIS
+        ---------------------------------------------------- */
+
         enableChat();
 
 
-        /* Events */
+        /* ----------------------------------------------------
+           EVENTS
+        ---------------------------------------------------- */
+
         setupEvents();
 
 
-        /* Backend */
+        /* ----------------------------------------------------
+           BACKEND
+        ---------------------------------------------------- */
+
         checkBackend();
 
+
+        /* ----------------------------------------------------
+           DEBUG INFO
+        ---------------------------------------------------- */
 
         console.log(
             "======================================"
         );
+
 
         console.log(
             "REELMIND FRONTEND READY"
         );
 
+
         console.log(
             "======================================"
         );
+
 
         console.log(
             "STT ROUTING:"
         );
 
+
         console.log(
             "English  -> Hugging Face Whisper API"
         );
+
 
         console.log(
             "Hinglish -> Sarvam Saaras v3 / codemix"
         );
 
+
         console.log(
             "API:",
             API_BASE
         );
+
 
         console.log(
             "======================================"
