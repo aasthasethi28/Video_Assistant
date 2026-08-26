@@ -32,6 +32,19 @@ def download_youtube_audio(url: str) -> str:
         "quiet": False,
         "noplaylist": True,
         "no_warnings": True,
+
+        "quiet": False,
+
+        "extractor_args": {
+                "youtubepot-bgutilscript": {
+        "script_path": (
+            ".bgutil-ytdlp-pot-provider/"
+            "server/build/generate_once.js"
+        )
+                }
+        },
+
+        "cookiefile": "/etc/secrets/cookies.txt",
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
