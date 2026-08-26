@@ -18,8 +18,6 @@ def download_youtube_audio(url: str) -> str:
         "%(id)s.%(ext)s"
     )
 
-    cookie_file = "/etc/secrets/cookies.txt"
-
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
@@ -34,7 +32,6 @@ def download_youtube_audio(url: str) -> str:
         "quiet": False,
         "noplaylist": True,
         "no_warnings": True,
-        "cookiefile": cookie_file,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
