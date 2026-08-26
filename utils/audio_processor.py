@@ -36,12 +36,12 @@ def download_youtube_audio(url: str) -> str:
         "quiet": False,
 
         "extractor_args": {
-                "youtubepot-bgutilscript": {
-        "script_path": (
-            ".bgutil-ytdlp-pot-provider/"
-            "server/build/generate_once.js"
-        )
-                }
+            "youtubepot-bgutilscript": {
+                "script_path": (
+                    ".bgutil-ytdlp-pot-provider/"
+                    "server/build/generate_once.js"
+                )
+            }
         },
 
         "cookiefile": "/etc/secrets/cookies.txt",
